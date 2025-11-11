@@ -42,7 +42,7 @@ The aplication will create a minecraft bedrock server using docker itzg/docker-m
 - ✅ Mobile responsive design
 
 ### Prerequisites
-- Docker & Docker Compose installed
+- Docker installed
 - Node.js 18+
 
 ---
@@ -188,6 +188,7 @@ The application includes password protection:
 - Session-based authentication
 - Mobile responsive design for all devices
 - Real-time updates without page refresh
+
 
 
 
