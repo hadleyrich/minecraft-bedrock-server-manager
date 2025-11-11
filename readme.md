@@ -189,6 +189,8 @@ The application includes password protection:
 - Mobile responsive design for all devices
 - Real-time updates without page refresh
 
+## SUPPORT ME
+<script type="text/javascript" src="https://storage.sociabuzz.com/storage/js/main/buttononwebsite/index.min.js"></script><script>sbBoW.draw("mughniy","QmVyaSBEdWt1bmdhbg","position-bottom-right","#76CC11","#FFFFFF")</script>
 
 
 
