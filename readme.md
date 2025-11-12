@@ -191,6 +191,8 @@ The application includes password protection:
 - Mobile responsive design for all devices
 - Real-time updates without page refresh
 
+---
+
 ## [SUPPORT ME](https://sociabuzz.com/mughniy/donate)
 
 
@@ -204,6 +206,7 @@ The application includes password protection:
 ![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101458.png?raw=true)
 ![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101519.png?raw=true)
 ![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101527.png?raw=true)
+
 
 
 
