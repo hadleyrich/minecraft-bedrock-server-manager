@@ -195,6 +195,19 @@ The application includes password protection:
 
 
 
+## Screenshot
+![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101417.png?raw=true)
+![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101429.png?raw=true)
+![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101439.png?raw=true)
+![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101447.png?raw=true)
+![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101452.png?raw=true)
+![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101458.png?raw=true)
+![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101519.png?raw=true)
+![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/Screenshot%202025-11-12%20101527.png?raw=true)
+
+
+
+
 
 
 
