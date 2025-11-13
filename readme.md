@@ -9,6 +9,7 @@ The aplication will deploy a minecraft bedrock server using docker itzg/docker-m
 
 ### Features
 - ✅ Multiple server management
+- ✅ Select server version (Latest, Latest Preview or custom)
 - ✅ Start/Stop/Restart containers
 - ✅ Server renaming
 - ✅ Console commands
@@ -23,7 +24,7 @@ The aplication will deploy a minecraft bedrock server using docker itzg/docker-m
   - Context menu (right-click)
   - Zip/Unzip files and folders
   - Keyboard shortcuts
-- ✅ **Addon Management** 🆕
+- ✅ **Addon Management** 
   - Upload .mcaddon, .mcpack, .mcworld, .mctemplate files
   - Enable/disable behavior packs
   - Enable/disable resource packs
@@ -137,112 +138,6 @@ npm start
 
 ---
 
-### File Manager Usage
-
-The built-in file manager supports comprehensive file operations:
-
-**Upload Files**
-1. Navigate to Files tab
-2. Click "📤 Upload" button
-3. Select one or multiple files
-4. Files will be uploaded to current directory
-
-**Edit Files**
-1. Double-click any text file
-2. Edit content in the modal editor
-3. Click "💾 Save" to save changes
-4. Supports .properties, .json, .txt, .yml, etc.
-
-**Rename Files/Folders**
-1. Click ✏️ icon on any file/folder
-2. Enter new name
-3. Click Rename
-
-**Navigate Folders**
-- Double-click folder to open
-- Click "⬆️ Up" to go to parent directory
-- Current path shown at top
-
-**Create New Folder**
-1. Click "📁 New Folder"
-2. Enter folder name
-3. Folder created in current directory
-
-**Delete Files/Folders**
-- Click 🗑️ icon
-- Confirm deletion
-- Works for both files and folders
-
-**Context Menu** (Right-click)
-- Right-click any file for quick actions:
-  - ⬇️ Download
-  - 📦 Zip (create archive)
-  - 📤 Unzip (extract archive)
-  - ✏️ Rename
-  - 📝 Edit (files only)
-  - 🗑️ Delete
-
-**Keyboard Shortcuts**
-- Double-click file: Open editor
-- Double-click folder: Navigate into folder
-- Right-click: Show context menu
-
-### Addon Management 🆕
-
-Manage Minecraft Bedrock addons directly through the web interface!
-
-**Quick Start:**
-1. Go to the **Addons** tab
-2. Click **"+ Upload Addon"**
-3. Select your `.mcaddon`, `.mcpack`, `.mcworld`, or `.mctemplate` file
-4. Enable the addon (for behavior/resource packs)
-5. Restart the server
-
-**Supported Formats:**
-- **`.mcaddon`** - Behavior/Resource pack bundles
-- **`.mcpack`** - Resource packs (textures, sounds)
-- **`.mcworld`** - Complete world saves
-- **`.mctemplate`** - World templates
-
-**Features:**
-- Automatic extraction and installation
-- Enable/disable packs without deleting
-- View pack details (version, description, size)
-- Automatic `world_behavior_packs.json` and `world_resource_packs.json` management
-- Support for multiple packs simultaneously
-
-**World Management:**
-- Switch between different worlds
-- Enable/Disable worlds
-- Delete worlds (except currently active world)
-- View world details (size, modification date, validity)
-
-### Player Management
-
-Manage players directly from the web interface:
-- **View Online Players** - See who's currently connected
-- **Kick Players** - Temporarily remove players with optional reason
-- **Ban Players** - Permanently ban players with optional reason
-- **OP/Deop** - Grant or revoke operator permissions
-
-### Server Management
-
-- **Server Renaming** - Rename servers without recreating them
-- **Dynamic Port Allocation** - Automatic port assignment to avoid conflicts
-- **Real-time Monitoring** - Live server stats and logs
-- **Container Management** - Full Docker container lifecycle management
-
-### Security
-
-The application includes password protection:
-- Set `LOGIN_PASSWORD` in `.env` file
-- Configure max login attempts and lockout duration
-- Session-based authentication
-- Mobile responsive design for all devices
-- Real-time updates without page refresh
-
----
-
 ## [SUPPORT ME](https://sociabuzz.com/mughniy/donate)
 
 
@@ -252,5 +147,6 @@ The application includes password protection:
 ![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/sc2.png?raw=true)
 ![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/sc3.png?raw=true)
 ![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/sc4.png?raw=true)
+
 
 
