@@ -220,12 +220,26 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
         }
 
-        // Login configuration
+        // Login configuration - loaded from server
         let LOGIN_CONFIG = {
-            PASSWORD: '@%0890MugH',
-            MAX_ATTEMPTS: 5,
-            LOCKOUT_MINUTES: 5
+            SESSION_HOURS: 24           // Session timeout: 24 hours (hardcoded)
         };
+
+        // Load login configuration from server
+        async function loadLoginConfig() {
+            try {
+                const response = await fetch(`${API_BASE}/config/login`);
+                if (response.ok) {
+                    const config = await response.json();
+                    LOGIN_CONFIG.PASSWORD = config.password;
+                    LOGIN_CONFIG.MAX_ATTEMPTS = config.maxAttempts;
+                    LOGIN_CONFIG.LOCKOUT_MINUTES = config.lockoutMinutes;
+                    // SESSION_HOURS is hardcoded to 24 hours
+                }
+            } catch (err) {
+                console.warn('Failed to load login config, using defaults:', err);
+            }
+        }
         
         // Check if user is logged in
         function checkAuth() {
@@ -236,9 +250,9 @@
                 return false;
             }
 
-            // Check if session is still valid (24 hours)
+            // Check if session is still valid (configurable hours)
             const sessionDuration = Date.now() - parseInt(loginTimestamp, 10);
-            const maxSessionTime = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+            const maxSessionTime = LOGIN_CONFIG.SESSION_HOURS * 60 * 60 * 1000; // Convert hours to milliseconds
 
             if (sessionDuration > maxSessionTime) {
                 // Session expired, clear authentication
@@ -252,40 +266,50 @@
         
         // Check if login is locked out
         function isLoginLocked() {
+            const attempts = parseInt(localStorage.getItem('loginAttempts') || '0');
             const lastAttempt = localStorage.getItem('lastFailedAttempt');
-            if (!lastAttempt) return false;
-            
-            const lockoutTime = 1000 * 60 * LOGIN_CONFIG.LOCKOUT_MINUTES; // Convert minutes to milliseconds
-            const timeSinceLastAttempt = Date.now() - parseInt(lastAttempt, 10);
-            
-            return timeSinceLastAttempt < lockoutTime;
+
+            // Only lock out if we've exceeded max attempts AND are still within lockout time
+            if (attempts >= LOGIN_CONFIG.MAX_ATTEMPTS && lastAttempt) {
+                const lockoutTime = 1000 * 60 * LOGIN_CONFIG.LOCKOUT_MINUTES; // Convert minutes to milliseconds
+                const timeSinceLastAttempt = Date.now() - parseInt(lastAttempt, 10);
+                return timeSinceLastAttempt < lockoutTime;
+            }
+
+            return false;
         }
         
         // Get remaining lockout time in seconds
         function getRemainingLockoutTime() {
+            const attempts = parseInt(localStorage.getItem('loginAttempts') || '0');
             const lastAttempt = localStorage.getItem('lastFailedAttempt');
-            if (!lastAttempt) return 0;
-            
-            const lockoutTime = 1000 * 60 * LOGIN_CONFIG.LOCKOUT_MINUTES;
-            const timeSinceLastAttempt = Date.now() - parseInt(lastAttempt, 10);
-            const remainingTime = Math.ceil((lockoutTime - timeSinceLastAttempt) / 1000);
-            
-            return remainingTime > 0 ? remainingTime : 0;
+
+            if (attempts >= LOGIN_CONFIG.MAX_ATTEMPTS && lastAttempt) {
+                const lockoutTime = 1000 * 60 * LOGIN_CONFIG.LOCKOUT_MINUTES;
+                const timeSinceLastAttempt = Date.now() - parseInt(lastAttempt, 10);
+                const remainingTime = Math.ceil((lockoutTime - timeSinceLastAttempt) / 1000);
+                return remainingTime > 0 ? remainingTime : 0;
+            }
+
+            return 0;
         }
         
         // Update login button state based on lockout
         function updateLoginButtonState() {
             const loginButton = document.getElementById('loginButton');
             const errorElement = document.getElementById('loginError');
-            
+
             if (isLoginLocked()) {
                 const remainingTime = getRemainingLockoutTime();
                 loginButton.disabled = true;
                 loginButton.textContent = `Tunggu ${remainingTime} detik`;
-                
+
                 if (remainingTime > 0) {
                     setTimeout(updateLoginButtonState, 1000);
                 } else {
+                    // Lockout period expired, reset attempts
+                    localStorage.removeItem('loginAttempts');
+                    localStorage.removeItem('lastFailedAttempt');
                     loginButton.disabled = false;
                     loginButton.textContent = 'Login';
                     errorElement.textContent = 'Silakan coba login kembali';
@@ -295,11 +319,25 @@
             }
         }
         
-        // Handle login
+        // Handle login - This function is ONLY called when user clicks Login button or presses Enter
+        // Refreshing the page does NOT call this function and should not increment attempt counter
         function checkLogin() {
             const passwordInput = document.getElementById('passwordInput');
             const errorElement = document.getElementById('loginError');
             const loginButton = document.getElementById('loginButton');
+
+            // Check if lockout period has expired and reset if needed
+            const attempts = parseInt(localStorage.getItem('loginAttempts') || '0');
+            const lastAttempt = localStorage.getItem('lastFailedAttempt');
+            if (attempts >= LOGIN_CONFIG.MAX_ATTEMPTS && lastAttempt) {
+                const lockoutTime = 1000 * 60 * LOGIN_CONFIG.LOCKOUT_MINUTES;
+                const timeSinceLastAttempt = Date.now() - parseInt(lastAttempt, 10);
+                if (timeSinceLastAttempt >= lockoutTime) {
+                    // Lockout expired, reset attempts
+                    localStorage.removeItem('loginAttempts');
+                    localStorage.removeItem('lastFailedAttempt');
+                }
+            }
 
             if (isLoginLocked()) {
                 const remainingTime = getRemainingLockoutTime();
@@ -319,38 +357,47 @@
                 document.getElementById('app').classList.remove('hidden');
                 fetchServers();
             } else {
-                // Login failed
-                const attempts = parseInt(localStorage.getItem('loginAttempts') || '0') + 1;
-                localStorage.setItem('loginAttempts', attempts);
+                // Login failed - increment attempt counter
+                const newAttempts = parseInt(localStorage.getItem('loginAttempts') || '0') + 1;
+                localStorage.setItem('loginAttempts', newAttempts);
                 localStorage.setItem('lastFailedAttempt', Date.now());
 
-                const remainingAttempts = LOGIN_CONFIG.MAX_ATTEMPTS - attempts;
+                const remainingAttempts = LOGIN_CONFIG.MAX_ATTEMPTS - newAttempts;
                 errorElement.textContent = `Incorrect password. ${remainingAttempts} attempts remaining.`;
                 errorElement.classList.remove('hidden');
 
-                if (attempts >= LOGIN_CONFIG.MAX_ATTEMPTS) {
+                if (newAttempts >= LOGIN_CONFIG.MAX_ATTEMPTS) {
                     updateLoginButtonState();
                 }
             }
         }
         
         // Check authentication on page load
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Load login configuration first
+            await loadLoginConfig();
+
+            // Clear any previous error messages on page load
+            document.getElementById('loginError').classList.add('hidden');
+            document.getElementById('passwordInput').value = '';
+
             if (checkAuth()) {
                 document.getElementById('loginForm').classList.add('hidden');
                 document.getElementById('app').classList.remove('hidden');
                 fetchServers();
             } else {
+                document.getElementById('loginForm').classList.remove('hidden');
+                document.getElementById('app').classList.add('hidden');
                 updateLoginButtonState();
             }
-            
+
             // Add event listener for password input
             document.getElementById('passwordInput').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
                     checkLogin();
                 }
             });
-            
+
             // Add click event to close sidebar when clicking outside
             document.addEventListener('click', (e) => {
                 const sidebar = document.querySelector('.sidebar');
@@ -2432,7 +2479,6 @@
                                             <button onclick="restoreBackup('${backup.id}')" class="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 rounded-lg">
                                                 ↩️ Restore
                                             </button>
-                                            <button onclick="downloadFile('${backup.path}')" class="px-2 py-1 text-sm hover:bg-gray-700 rounded">⬇️</button>
                                         </div>
                                     </div>
                                 `).join('')}
