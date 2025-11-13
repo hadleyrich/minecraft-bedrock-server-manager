@@ -1170,6 +1170,7 @@ async function findAvailablePort(startPort) {
 // Serve login configuration
 app.get('/api/config/login', (req, res) => {
   res.json({
+    password: process.env.LOGIN_PASSWORD || 'minecraft123',
     maxAttempts: process.env.MAX_LOGIN_ATTEMPTS || 5,
     lockoutMinutes: process.env.LOGIN_LOCKOUT_MINUTES || 5
   });
@@ -1709,7 +1710,9 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Bedrock Server Manager API running on port ${PORT}`);
   console.log('Login configuration:');
+  console.log(`- Password: ${process.env.LOGIN_PASSWORD ? '[SET]' : '[DEFAULT]'}`);
   console.log(`- Max login attempts: ${process.env.MAX_LOGIN_ATTEMPTS || 5}`);
   console.log(`- Lockout duration: ${process.env.LOGIN_LOCKOUT_MINUTES || 5} minutes`);
+  console.log(`- Session timeout: 24 hours (hardcoded)`);
   console.log(`Data directory: ${DATA_DIR}`);
 });
