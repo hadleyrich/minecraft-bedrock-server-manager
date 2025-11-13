@@ -37,7 +37,7 @@ The aplication will deploy a minecraft bedrock server using docker itzg/docker-m
 - ✅ Server configuration editor
 - ✅ Player management (kick, ban, op, deop)
 - ✅ Dynamic port allocation
-- ✅ Web-based UI (no build required!)
+- ✅ Web-based UI
 - ✅ Password-protected login
 - ✅ Session-based authentication
 - ✅ Mobile responsive design
@@ -147,6 +147,7 @@ npm start
 ![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/sc2.png?raw=true)
 ![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/sc3.png?raw=true)
 ![enter image description here](https://github.com/mugh/minecraftbedrockservermanager/blob/main/Screenshot/sc4.png?raw=true)
+
 
 
 
