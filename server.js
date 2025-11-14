@@ -299,9 +299,64 @@ app.post('/api/servers/:id/rename', async (req, res) => {
     // Save metadata
     await fs.writeJson(metadataPath, metadata, { spaces: 2 });
 
+    // Get current container info
+    const container = await getContainer(serverId);
+    if (!container) {
+      return res.status(404).json({ error: 'Container not found' });
+    }
+
+    const containerInfo = await container.inspect();
+    const wasRunning = containerInfo.State.Running;
+
+    // Stop container if running
+    if (wasRunning) {
+      await container.stop();
+    }
+
+    // Remove container
+    await container.remove();
+
+    // Find available ports (reuse existing if possible)
+    const gamePort = containerInfo.HostConfig.PortBindings['19132/udp']?.[0]?.HostPort || await findAvailablePort(19132);
+    const rconPort = containerInfo.HostConfig.PortBindings['19133/tcp']?.[0]?.HostPort || await findAvailablePort(25575);
+
+    // Create new container with updated server name
+    const newContainer = await docker.createContainer({
+      Image: BEDROCK_IMAGE,
+      name: serverId,
+      Labels: {
+        'server-id': serverId,
+        'server-name': name.trim()
+      },
+      Env: [
+        'EULA=TRUE',
+        'VERSION=' + (metadata.version || 'LATEST'),
+        'GAMEMODE=survival',
+        'DIFFICULTY=normal',
+        'SERVER_NAME=' + name.trim()
+      ],
+      HostConfig: {
+        Binds: [`${serverPath}:/data`],
+        PortBindings: {
+          '19132/udp': [{ HostPort: gamePort.toString() }],
+          '19133/tcp': [{ HostPort: rconPort.toString() }]
+        },
+        RestartPolicy: {
+          Name: 'unless-stopped'
+        },
+        Memory: containerInfo.HostConfig.Memory || 2 * 1024 * 1024 * 1024 // 2GB
+      }
+    });
+
+    // Start container if it was running before
+    if (wasRunning) {
+      await newContainer.start();
+    }
+
     res.json({
       message: 'Server renamed successfully',
-      name: name.trim()
+      name: name.trim(),
+      restarted: wasRunning
     });
   } catch (err) {
     console.error('Error renaming server:', err);
