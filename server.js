@@ -38,10 +38,26 @@ async function ensureTempDirs() {
   }
 }
 
-// Cross-platform Docker configuration
-const dockerConfig = process.platform === 'win32'
-  ? { host: 'localhost', port: 2375 } // Windows Docker Desktop (ensure TCP is enabled)
-  : { socketPath: '/var/run/docker.sock' }; // Linux/Unix socket
+// Cross-platform Docker configuration with environment variable support
+let dockerConfig;
+if (process.env.DOCKER_HOST) {
+  // Parse DOCKER_HOST (e.g., tcp://host.docker.internal:2375 or unix:///var/run/docker.sock)
+  const dockerHost = process.env.DOCKER_HOST;
+  if (dockerHost.startsWith('tcp://')) {
+    const url = new URL(dockerHost);
+    dockerConfig = { host: url.hostname, port: parseInt(url.port) };
+  } else if (dockerHost.startsWith('unix://')) {
+    dockerConfig = { socketPath: dockerHost.substring(7) };
+  } else {
+    // Fallback for other formats
+    dockerConfig = { socketPath: '/var/run/docker.sock' };
+  }
+} else {
+  // Platform-based defaults
+  dockerConfig = process.platform === 'win32'
+    ? { host: 'localhost', port: 2375 } // Windows Docker Desktop (ensure TCP is enabled)
+    : { socketPath: '/var/run/docker.sock' }; // Linux/Unix socket
+}
 const docker = new Docker(dockerConfig);
 
 app.use(cors({
