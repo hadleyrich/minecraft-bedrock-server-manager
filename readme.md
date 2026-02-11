@@ -38,6 +38,7 @@ The aplication will deploy a minecraft bedrock server using docker itzg/docker-m
 - ✅ Server configuration editor
 - ✅ Player management (kick, ban, op, deop)
 - ✅ Dynamic port allocation
+- ✅ Docker network configuration
 - ✅ Web-based UI
 - ✅ Password-protected login
 - ✅ Session-based authentication
@@ -50,6 +51,21 @@ The aplication will deploy a minecraft bedrock server using docker itzg/docker-m
 - Addons are now displayed as a unified list instead of separate behavior and resource pack tabs
 - Each addon shows type indicators: `BP` (Behavior Pack), `RP` (Resource Pack), or `BP + RP` (both types)
 - Enable/disable and delete operations work on both pack types simultaneously
+
+
+### Docker Network Configuration
+
+**Custom Network Support**
+- Specify a Docker network for server containers via environment variable or per-server configuration
+- Set `DOCKER_NETWORK=your-network-name` in `.env` to apply to all new servers by default
+- Optionally specify a network when creating individual servers through the UI
+- Useful for isolating servers or enabling communication between containers on the same network
+- Existing servers continue using their configured network (or default if none)
+
+**Example Use Cases:**
+- Multiple servers sharing a custom network for inter-server communication
+- Isolation of game servers from other Docker containers
+- Integration with external services on the same Docker network
 
 
 ### WebSocket Real-time Features
@@ -85,6 +101,11 @@ Create a `.env` file in the root directory:
 # Server Configuration
 PORT=3001
 DATA_DIR=/opt/minecraft-servers #change this to your data directory
+
+# Docker Configuration (Optional)
+# Specify a Docker network for containers to use
+# Leave commented to use Docker's default bridge network
+#DOCKER_NETWORK=minecraft-network
 
 # Authentication
 LOGIN_PASSWORD=your_secure_password_here
