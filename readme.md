@@ -153,14 +153,7 @@ sudo mkdir -p /opt/minecraft-servers #change this to your data directory
 sudo chown $USER:$USER /opt/minecraft-servers #change this to your data directory
 ```
 
-#### 4. **WebSocket Setup**
-
-```bash
-# Run WebSocket setup
-npm run setup
-```
-
-#### 5. **Start the Application**
+#### 4. **Start the Application**
 
 ```bash
 # Start the app (run on PM2)

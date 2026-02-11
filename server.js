@@ -3165,3 +3165,26 @@ server.listen(PORT, async () => {
   console.log(`Temp directory: ./temp/`);
   console.log(`WebSocket server ready for real-time updates`);
 });
+
+// Graceful shutdown handlers
+const gracefulShutdown = (signal) => {
+  console.log(`${signal} received, shutting down gracefully...`);
+
+  // Disconnect all Socket.IO clients immediately
+  io.disconnectSockets();
+
+  // Force exit after 5 seconds if graceful shutdown doesn't complete
+  const forceExitTimer = setTimeout(() => {
+    console.log('Forced exit due to timeout');
+    process.exit(1);
+  }, 5000);
+
+  server.close(() => {
+    clearTimeout(forceExitTimer);
+    console.log('Server closed');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
