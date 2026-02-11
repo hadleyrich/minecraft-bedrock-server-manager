@@ -317,7 +317,6 @@ const applyNetworkConfig = (containerConfig, metadata) => {
   if (metadata.network || DOCKER_NETWORK) {
     containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
   }
-  return containerConfig;
 };
 
 // Helper: Get host data path by inspecting container mounts
