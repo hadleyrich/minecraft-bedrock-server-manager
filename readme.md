@@ -178,16 +178,61 @@ npm start
 3. Enable "Expose daemon on tcp://localhost:2375 without TLS"
 4. Restart Docker Desktop
 
-Image : https://hub.docker.com/r/mugh/bdsmanagerforitzg
+#### Docker Images
+
+This project provides Docker images through multiple registries:
+
+- **Docker Hub**: https://hub.docker.com/r/mugh/bdsmanagerforitzg
+- **GitHub Container Registry (GHCR)**: `ghcr.io/hadleyrich/minecraft-bedrock-server-manager:latest`
+
+The GHCR images are automatically built and published via GitHub Actions on every push to the main branch and for tagged releases.
+
+**Available Tags:**
+- `latest` - Latest build from the main/master branch
+- `v1.0.0` - Semantic version tags (when releases are created)
+- `main`, `master` - Branch-specific tags
+
+**Multi-platform Support:**
+Both Docker Hub and GHCR images support multiple architectures:
+- `linux/amd64` (x86_64)
+- `linux/arm64` (ARM64/aarch64)
 
 #### Docker Compose Example
 
----
+**Using Docker Hub:**
 
-```bash
+```yaml
 services:
   server-manager:
     image: mugh/bdsmanagerforitzg:latest
+    ports:
+      - "3001:3001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - minecraft-data:/app/minecraft-data
+    environment:
+      - PORT=3001
+      - LOGIN_PASSWORD=minecraft123
+      - MAX_LOGIN_ATTEMPTS=5
+      - LOGIN_LOCKOUT_MINUTES=5
+      #- DOCKER_HOST=tcp://host.docker.internal:2375 #for system with restricted direct mounting to /var/run/docker.sock (windows or NAS)
+    networks:
+      - minecraft-network
+
+volumes:
+  minecraft-data:
+
+networks:
+  minecraft-network:
+    driver: bridge
+```
+
+**Using GitHub Container Registry (GHCR):**
+
+```yaml
+services:
+  server-manager:
+    image: ghcr.io/hadleyrich/minecraft-bedrock-server-manager:latest
     ports:
       - "3001:3001"
     volumes:
