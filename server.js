@@ -315,6 +315,9 @@ const getServerPath = (serverId) => path.join(DATA_DIR, serverId);
 // Helper: Apply network configuration to container config
 const applyNetworkConfig = (containerConfig, metadata) => {
   if (metadata.network || DOCKER_NETWORK) {
+    if (!containerConfig.HostConfig) {
+      containerConfig.HostConfig = {};
+    }
     containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
   }
 };
