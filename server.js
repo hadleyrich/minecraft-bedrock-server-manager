@@ -312,6 +312,14 @@ const DOCKER_NETWORK = process.env.DOCKER_NETWORK || null;
 // Helper: Get server data path
 const getServerPath = (serverId) => path.join(DATA_DIR, serverId);
 
+// Helper: Apply network configuration to container config
+const applyNetworkConfig = (containerConfig, metadata) => {
+  if (metadata.network || DOCKER_NETWORK) {
+    containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
+  }
+  return containerConfig;
+};
+
 // Helper: Get host data path by inspecting container mounts
 const getHostDataPath = async () => {
   try {
@@ -517,10 +525,7 @@ app.post('/api/servers/import', async (req, res) => {
       }
     };
     
-    // Add network mode if specified
-    if (metadata.network || DOCKER_NETWORK) {
-      containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
-    }
+    applyNetworkConfig(containerConfig, metadata);
     
     const newContainer = await docker.createContainer(containerConfig);
 
@@ -622,10 +627,7 @@ app.post('/api/servers', async (req, res) => {
       }
     };
     
-    // Add network mode if specified
-    if (network || DOCKER_NETWORK) {
-      containerConfig.HostConfig.NetworkMode = network || DOCKER_NETWORK;
-    }
+    applyNetworkConfig(containerConfig, { network });
     
     const container = await docker.createContainer(containerConfig);
 
@@ -744,10 +746,7 @@ app.post('/api/servers/:id/start', async (req, res) => {
           }
         };
         
-        // Add network mode if specified
-        if (metadata.network || DOCKER_NETWORK) {
-          containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
-        }
+        applyNetworkConfig(containerConfig, metadata);
         
         const newContainer = await docker.createContainer(containerConfig);
 
@@ -911,10 +910,7 @@ app.post('/api/servers/:id/rename', async (req, res) => {
       }
     };
     
-    // Add network mode if specified
-    if (metadata.network || DOCKER_NETWORK) {
-      containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
-    }
+    applyNetworkConfig(containerConfig, metadata);
     
     const newContainer = await docker.createContainer(containerConfig);
 
@@ -1025,10 +1021,7 @@ app.post('/api/servers/:id/version', async (req, res) => {
       }
     };
     
-    // Add network mode if specified
-    if (metadata.network || DOCKER_NETWORK) {
-      containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
-    }
+    applyNetworkConfig(containerConfig, metadata);
     
     const newContainer = await docker.createContainer(containerConfig);
 
@@ -1153,10 +1146,7 @@ app.put('/api/servers/:id/memory', async (req, res) => {
       }
     };
     
-    // Add network mode if specified
-    if (metadata.network || DOCKER_NETWORK) {
-      containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
-    }
+    applyNetworkConfig(containerConfig, metadata);
     
     const newContainer = await docker.createContainer(containerConfig);
 
