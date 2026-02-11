@@ -973,6 +973,11 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Docker Network (Optional)</label>
+                            <input id="swal-docker-network" type="text" placeholder="e.g. minecraft-network" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-white text-sm">
+                            <p class="text-xs text-gray-400 mt-1">Leave empty to use default Docker network</p>
+                        </div>
                     </div>
                 `,
                 showCancelButton: true,
@@ -994,6 +999,7 @@
                 preConfirm: () => {
                     const name = document.getElementById('swal-server-name').value.trim();
                     const versionType = document.querySelector('input[name="version-type"]:checked').value;
+                    const network = document.getElementById('swal-docker-network').value.trim();
                     let version;
 
                     if (versionType === 'CUSTOM') {
@@ -1010,19 +1016,19 @@
                         Swal.showValidationMessage('Server name is required!');
                         return false;
                     }
-                    return { name, version };
+                    return { name, version, network: network || null };
                 }
             });
 
             if (!formValues) return;
-            const { name, version } = formValues;
+            const { name, version, network } = formValues;
 
             try {
                 showLoading();
                 await fetch(`${API_BASE}/servers`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, version })
+                    body: JSON.stringify({ name, version, network })
                 });
                 await fetchServers();
                 hideLoading();
@@ -2524,6 +2530,10 @@
                                     <div class="flex justify-between text-sm">
                                         <span class="text-gray-400">World Size</span>
                                         <span class="font-mono">${server.worldSize || '0 MB'}</span>
+                                    </div>
+                                    <div class="flex justify-between text-sm">
+                                        <span class="text-gray-400">Docker Network</span>
+                                        <span class="font-mono">${server.network || 'default'}</span>
                                     </div>
                                 </div>
                             </div>

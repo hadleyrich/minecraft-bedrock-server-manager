@@ -173,6 +173,7 @@ async function getCachedServerInfo(serverId) {
     name: metadata.name || info.Name.replace('/', ''),
     containerName: metadata.containerName || serverId,
     version: metadata.version || 'LATEST',
+    network: metadata.network || null,
     status: info.State.Status,
     players: playerCount,
     maxPlayers: maxPlayers,
@@ -306,6 +307,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Configuration
 const DATA_DIR = process.env.DATA_DIR;
 const BEDROCK_IMAGE = 'itzg/minecraft-bedrock-server';
+const DOCKER_NETWORK = process.env.DOCKER_NETWORK || null;
 
 // Helper: Get server data path
 const getServerPath = (serverId) => path.join(DATA_DIR, serverId);
@@ -491,7 +493,7 @@ app.post('/api/servers/import', async (req, res) => {
     }
 
     // Create new container
-    const newContainer = await docker.createContainer({
+    const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
       Labels: {
@@ -513,7 +515,14 @@ app.post('/api/servers/import', async (req, res) => {
         },
         Memory: metadata.memory
       }
-    });
+    };
+    
+    // Add network mode if specified
+    if (metadata.network || DOCKER_NETWORK) {
+      containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
+    }
+    
+    const newContainer = await docker.createContainer(containerConfig);
 
     // Start the new container
     await newContainer.start();
@@ -548,7 +557,7 @@ app.post('/api/servers/import', async (req, res) => {
 // POST /api/servers - Create new server
 app.post('/api/servers', async (req, res) => {
   try {
-    const { name, version = 'LATEST' } = req.body;
+    const { name, version = 'LATEST', network } = req.body;
     const serverId = `bedrock-${Date.now()}`;
     const serverPath = getServerPath(serverId);
     const hostDataPath = await getHostDataPath();
@@ -563,6 +572,7 @@ app.post('/api/servers', async (req, res) => {
       name: name,
       version: version,
       memory: 2 * 1024 * 1024 * 1024, // 2GB default
+      network: network || null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -588,7 +598,7 @@ app.post('/api/servers', async (req, res) => {
     }
 
     // Create container
-    const container = await docker.createContainer({
+    const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
       Labels: {
@@ -610,7 +620,14 @@ app.post('/api/servers', async (req, res) => {
         },
         Memory: metadata.memory
       }
-    });
+    };
+    
+    // Add network mode if specified
+    if (network || DOCKER_NETWORK) {
+      containerConfig.HostConfig.NetworkMode = network || DOCKER_NETWORK;
+    }
+    
+    const container = await docker.createContainer(containerConfig);
 
     await container.start();
 
@@ -703,7 +720,7 @@ app.post('/api/servers/:id/start', async (req, res) => {
         // Get memory from metadata
         let memory = metadata.memory || 2 * 1024 * 1024 * 1024; // default 2GB
 
-        const newContainer = await docker.createContainer({
+        const containerConfig = {
           Image: BEDROCK_IMAGE,
           name: serverId,
           Labels: {
@@ -725,7 +742,14 @@ app.post('/api/servers/:id/start', async (req, res) => {
             },
             Memory: memory
           }
-        });
+        };
+        
+        // Add network mode if specified
+        if (metadata.network || DOCKER_NETWORK) {
+          containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
+        }
+        
+        const newContainer = await docker.createContainer(containerConfig);
 
         // Start the new container
         await newContainer.start();
@@ -863,7 +887,7 @@ app.post('/api/servers/:id/rename', async (req, res) => {
     }
 
     // Create new container with updated server name
-    const newContainer = await docker.createContainer({
+    const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
       Labels: {
@@ -885,7 +909,14 @@ app.post('/api/servers/:id/rename', async (req, res) => {
         },
         Memory: memory
       }
-    });
+    };
+    
+    // Add network mode if specified
+    if (metadata.network || DOCKER_NETWORK) {
+      containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
+    }
+    
+    const newContainer = await docker.createContainer(containerConfig);
 
     // Start container if it was running before
     if (wasRunning) {
@@ -970,7 +1001,7 @@ app.post('/api/servers/:id/version', async (req, res) => {
     const hostServerPath = path.join(hostDataPath, serverId);
 
     // Create new container with updated version
-    const newContainer = await docker.createContainer({
+    const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
       Labels: {
@@ -992,7 +1023,14 @@ app.post('/api/servers/:id/version', async (req, res) => {
         },
         Memory: memory
       }
-    });
+    };
+    
+    // Add network mode if specified
+    if (metadata.network || DOCKER_NETWORK) {
+      containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
+    }
+    
+    const newContainer = await docker.createContainer(containerConfig);
 
     // Start container if it was running before
     if (wasRunning) {
@@ -1091,7 +1129,7 @@ app.put('/api/servers/:id/memory', async (req, res) => {
     }
 
     // Create new container with updated memory
-    const newContainer = await docker.createContainer({
+    const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
       Labels: {
@@ -1113,7 +1151,14 @@ app.put('/api/servers/:id/memory', async (req, res) => {
         },
         Memory: memoryBytes
       }
-    });
+    };
+    
+    // Add network mode if specified
+    if (metadata.network || DOCKER_NETWORK) {
+      containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
+    }
+    
+    const newContainer = await docker.createContainer(containerConfig);
 
     // Start container if it was running before
     if (wasRunning) {
