@@ -2,6 +2,14 @@
 
 Full-stack application to manage multiple Minecraft Bedrock servers using itzg/docker-minecraft-bedrock-server.
 
+**Forked from [mugh/minecraft-bedrock-server-manager](https://github.com/mugh/minecraft-bedrock-server-manager)**
+
+### Changes from original project:
+
+- Ability to use macvlan/ipvlan networks where containers get their own IP addresses and bypass port mapping
+- Enable SSH access to minecraft bedrock containers for backups
+- Dependency updates and Dockerfile improvements
+
 ## How it works
 
 The aplication will deploy a minecraft bedrock server using docker itzg/docker-minecraft-bedrock-server latest image, assign port, persistent volume. The aplication then act as UI to manage this container.
@@ -107,7 +115,128 @@ This application uses WebSocket for real-time updates, providing instant UI sync
 
 ---
 
-### Linux Installation
+### Docker Deployment (preferred)
+
+#### Prerequisites
+
+- Docker installed
+- Docker Compose installed
+
+#### Docker Desktop Configuration
+
+1. Open Docker Desktop
+2. Go to Settings → General
+3. Enable "Expose daemon on tcp://localhost:2375 without TLS"
+4. Restart Docker Desktop
+
+#### Docker Socket Access Setup
+
+This project requires access to the Docker socket to manage Minecraft Bedrock servers.
+
+Ideally you would use a proxy such as wollomatic/socket-proxy to securely expose the Docker API without mounting the socket directly.
+You can set the `DOCKER_HOST` environment variable to point to the proxy (e.g. `tcp://docker-proxy:2375`) if so.
+
+If you need to use the Docker socket, since Docker socket permissions vary across systems, a dynamic entrypoint script handles GID resolution automatically.
+
+**How It Works**
+
+The `docker-entrypoint.sh` script:
+
+1. Detects the GID of the mounted Docker socket on the host
+2. Creates a `docker` group inside the container with that GID
+3. Adds the `node` user to the `docker` group
+4. Allows the application to communicate with the Docker daemon
+
+**Requirements**
+
+- **Docker socket mounted**: `/var/run/docker.sock:/var/run/docker.sock`
+
+**Troubleshooting Docker Socket Issues**
+
+If you encounter Docker socket access problems:
+
+- **"Cannot connect to Docker daemon"**: Verify the socket exists with `ls -la /var/run/docker.sock` and that it's mounted in the container with `docker exec <container> ls -la /var/run/docker.sock`
+- **"Permission denied" errors**: Check the socket GID in container with `docker exec <container> stat /var/run/docker.sock` and verify the user is in the docker group with `docker exec <container> groups node`
+- **Rootless Docker**: The socket location may differ. Mount it like: `-v "$XDG_RUNTIME_DIR/docker.sock:/var/run/docker.sock"`
+- **Custom Docker Socket Path**: If your Docker socket is at a custom location, mount it to `/var/run/docker.sock` in the container
+
+**Security Considerations**
+
+- The application has full Docker API access, equivalent to localhost Docker access
+- Only deploy on trusted networks or with proper authentication
+- The `node` user runs the application with the `docker` group permission
+- No elevation to root occurs during container startup
+
+#### Docker Images
+
+This project provides Docker images through Github Container Registry:
+
+- **GitHub Container Registry (GHCR)**: `ghcr.io/hadleyrich/minecraft-bedrock-server-manager:latest`
+
+The GHCR images are automatically built and published via GitHub Actions on every push to the main branch and for tagged releases.
+
+**Available Tags:**
+
+- `latest` - Latest build from the main/master branch
+- `v1.0.0` - Semantic version tags (when releases are created)
+- `main`, `master` - Branch-specific tags
+
+**Multi-platform Support:**
+GHCR images support multiple architectures:
+
+- `linux/amd64` (x86_64)
+- `linux/arm64` (ARM64/aarch64)
+
+#### Docker Compose Example
+
+```yaml
+services:
+  server-manager:
+    image: ghcr.io/hadleyrich/minecraft-bedrock-server-manager:latest
+    ports:
+      - "3001:3001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./minecraft-data:/app/minecraft-data
+    environment:
+      - PORT=3001
+      - LOGIN_PASSWORD=minecraft123
+      - MAX_LOGIN_ATTEMPTS=5
+      - LOGIN_LOCKOUT_MINUTES=5
+      #- DOCKER_HOST=tcp://host.docker.internal:2375 #for system with restricted direct mounting to /var/run/docker.sock (windows or NAS)
+    networks:
+      - minecraft
+
+networks:
+  minecraft:
+    driver: bridge
+```
+
+#### Access the application
+
+The application will be available at `http://localhost:3001`
+Default login password: `minecraft123` (change in environment variables)
+
+#### Environment Variables
+
+You can customize the deployment by editing the following environment variables:
+
+- `LOGIN_PASSWORD`: Set your desired password
+- `PORT`: Change the port if needed (default: 3001)
+- `MAX_LOGIN_ATTEMPTS`: Maximum failed login attempt
+- `LOGIN_LOCKOUT_MINUTES`: duration of lockout in case or reaching MAX_LOGIN_ATTEMPTS
+- `DOCKER_HOST`: Set to `tcp://docker-proxy:2375` if your system restricts direct mounting of the Docker socket
+- `DOCKER_NETWORK`: Specify a Docker network for server containers (optional)
+- `ENABLE_SSH`: Set to `true` to enable SSH access to Minecraft server containers (optional)
+
+#### Volumes
+
+- `./minecraft-data`: Persistent storage for Minecraft server data (can also be a volume or bind mount to a different directory)
+- `/var/run/docker.sock`: Allows the app to manage Docker containers
+
+---
+
+### Linux Installation (without Docker)
 
 #### Prerequisites
 
@@ -163,120 +292,6 @@ npm start
 **Access the application at: `http://localhost:3001`**
 
 ---
-
-### Docker Deployment
-
-#### Prerequisites
-
-- Docker installed
-- Docker Compose installed
-
-#### Docker Desktop Configuration
-
-1. Open Docker Desktop
-2. Go to Settings → General
-3. Enable "Expose daemon on tcp://localhost:2375 without TLS"
-4. Restart Docker Desktop
-
-#### Docker Images
-
-This project provides Docker images through multiple registries:
-
-- **Docker Hub**: https://hub.docker.com/r/mugh/bdsmanagerforitzg
-- **GitHub Container Registry (GHCR)**: `ghcr.io/hadleyrich/minecraft-bedrock-server-manager:latest`
-
-The GHCR images are automatically built and published via GitHub Actions on every push to the main branch and for tagged releases.
-
-**Available Tags:**
-- `latest` - Latest build from the main/master branch
-- `v1.0.0` - Semantic version tags (when releases are created)
-- `main`, `master` - Branch-specific tags
-
-**Multi-platform Support:**
-Both Docker Hub and GHCR images support multiple architectures:
-- `linux/amd64` (x86_64)
-- `linux/arm64` (ARM64/aarch64)
-
-#### Docker Compose Example
-
-**Using Docker Hub:**
-
-```yaml
-services:
-  server-manager:
-    image: mugh/bdsmanagerforitzg:latest
-    ports:
-      - "3001:3001"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - minecraft-data:/app/minecraft-data
-    environment:
-      - PORT=3001
-      - LOGIN_PASSWORD=minecraft123
-      - MAX_LOGIN_ATTEMPTS=5
-      - LOGIN_LOCKOUT_MINUTES=5
-      #- DOCKER_HOST=tcp://host.docker.internal:2375 #for system with restricted direct mounting to /var/run/docker.sock (windows or NAS)
-    networks:
-      - minecraft-network
-
-volumes:
-  minecraft-data:
-
-networks:
-  minecraft-network:
-    driver: bridge
-```
-
-**Using GitHub Container Registry (GHCR):**
-
-```yaml
-services:
-  server-manager:
-    image: ghcr.io/hadleyrich/minecraft-bedrock-server-manager:latest
-    ports:
-      - "3001:3001"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - minecraft-data:/app/minecraft-data
-    environment:
-      - PORT=3001
-      - LOGIN_PASSWORD=minecraft123
-      - MAX_LOGIN_ATTEMPTS=5
-      - LOGIN_LOCKOUT_MINUTES=5
-      #- DOCKER_HOST=tcp://host.docker.internal:2375 #for system with restricted direct mounting to /var/run/docker.sock (windows or NAS)
-    networks:
-      - minecraft-network
-
-volumes:
-  minecraft-data:
-
-networks:
-  minecraft-network:
-    driver: bridge
-```
-
-#### Access the application
-
-The application will be available at `http://localhost:3001`
-Default login password: `minecraft123` (change in environtment variables)
-
-#### Environment Variables
-
-You can customize the deployment by editing the `docker-compose.yml` file:
-
-- `LOGIN_PASSWORD`: Set your desired password
-- `PORT`: Change the port if needed (default: 3001)
-- `MAX_LOGIN_ATTEMPTS`: Maximum failed login attempt
-- `LOGIN_LOCKOUT_MINUTES`: duration of lockout in case or reaching MAX_LOGIN_ATTEMPTS
-
-#### Volumes
-
-- `minecraft-data`: Persistent storage for Minecraft server data
-- `/var/run/docker.sock`: Allows the app to manage Docker containers
-
----
-
-## [SUPPORT ME](https://sociabuzz.com/mughniy/donate)
 
 ## Screenshot
 
