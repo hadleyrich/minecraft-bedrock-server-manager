@@ -317,6 +317,22 @@ app.use(express.static(path.join(__dirname, 'public')));
 const DATA_DIR = process.env.DATA_DIR;
 const BEDROCK_IMAGE = 'itzg/minecraft-bedrock-server';
 const DOCKER_NETWORK = process.env.DOCKER_NETWORK || null;
+const ENABLE_SSH = process.env.ENABLE_SSH === 'true' || process.env.ENABLE_SSH === 'TRUE' || process.env.ENABLE_SSH === '1';
+
+// Helper: Build container environment variables
+function buildContainerEnv(metadata, overrides = {}) {
+  const env = [
+    'EULA=TRUE',
+    'VERSION=' + (overrides.version || metadata.version || 'LATEST'),
+    'SERVER_NAME=' + (overrides.name || metadata.name || 'Bedrock Server')
+  ];
+
+  if (ENABLE_SSH) {
+    env.push('ENABLE_SSH=TRUE');
+  }
+
+  return env;
+}
 
 // Helper: Get server data path
 const getServerPath = (serverId) => path.join(DATA_DIR, serverId);
@@ -564,11 +580,7 @@ app.post('/api/servers/import', async (req, res) => {
         'server-id': serverId,
         'server-name': serverName
       },
-      Env: [
-        'EULA=TRUE',
-        'VERSION=' + serverVersion,
-        'SERVER_NAME=' + serverName
-      ],
+      Env: buildContainerEnv({ version: serverVersion, name: serverName }),
       HostConfig: {
         Binds: [`${hostServerPath}:/data`],
         RestartPolicy: {
@@ -666,11 +678,7 @@ app.post('/api/servers', async (req, res) => {
         'server-id': serverId,
         'server-name': name
       },
-      Env: [
-        'EULA=TRUE',
-        'VERSION=' + version,
-        'SERVER_NAME=' + name
-      ],
+      Env: buildContainerEnv({ version: version, name: name }),
       HostConfig: {
         Binds: [`${hostServerPath}:/data`],
         PortBindings: {
@@ -784,11 +792,7 @@ app.post('/api/servers/:id/start', async (req, res) => {
             'server-id': serverId,
             'server-name': metadata.name || serverId
           },
-          Env: [
-            'EULA=TRUE',
-            'VERSION=' + (metadata.version || 'LATEST'),
-            'SERVER_NAME=' + (metadata.name || serverId)
-          ],
+          Env: buildContainerEnv(metadata),
           HostConfig: {
             Binds: [`${hostServerPath}:/data`],
             RestartPolicy: {
@@ -938,11 +942,7 @@ app.post('/api/servers/:id/rename', async (req, res) => {
         'server-id': serverId,
         'server-name': name.trim()
       },
-      Env: [
-        'EULA=TRUE',
-        'VERSION=' + (metadata.version || 'LATEST'),
-        'SERVER_NAME=' + name.trim()
-      ],
+      Env: buildContainerEnv(metadata, { name: name.trim() }),
       HostConfig: {
         Binds: [`${hostServerPath}:/data`],
         RestartPolicy: {
@@ -1047,11 +1047,7 @@ app.post('/api/servers/:id/version', async (req, res) => {
         'server-id': serverId,
         'server-name': metadata.name
       },
-      Env: [
-        'EULA=TRUE',
-        'VERSION=' + version.trim(),
-        'SERVER_NAME=' + metadata.name
-      ],
+      Env: buildContainerEnv(metadata, { version: version.trim() }),
       HostConfig: {
         Binds: [`${hostServerPath}:/data`],
         RestartPolicy: {
@@ -1170,11 +1166,7 @@ app.put('/api/servers/:id/memory', async (req, res) => {
         'server-id': serverId,
         'server-name': metadata.name
       },
-      Env: [
-        'EULA=TRUE',
-        'VERSION=' + (metadata.version || 'LATEST'),
-        'SERVER_NAME=' + metadata.name
-      ],
+      Env: buildContainerEnv(metadata),
       HostConfig: {
         Binds: [`${hostServerPath}:/data`],
         RestartPolicy: {
