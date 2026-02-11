@@ -6,8 +6,8 @@
   "scripts": {
     "start": "npm run build:assets && pm2 start ecosystem.config.js --env production",
     "dev": "nodemon server.js",
-    "build:css": "tailwindcss -i ./public/styles.css -o ./public/output.css --watch",
-    "build:css:prod": "tailwindcss -i ./public/styles.css -o ./public/output.css --minify",
+    "build:css": "tailwindcss -i ./src/styles.css -o ./public/output.css --watch",
+    "build:css:prod": "tailwindcss -i ./src/styles.css -o ./public/output.css --minify",
     "build:assets": "npm run build:css:prod && npm run copy-assets",
     "copy-assets": "node scripts/copy-assets.js",
     "pm2:start": "npm run build:assets && pm2 start ecosystem.config.js",

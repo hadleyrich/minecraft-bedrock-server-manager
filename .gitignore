@@ -1,3 +1,9 @@
 node_modules/
 .env
 logs/
+
+# Generated output (build from src/)
+public/
+
+# Temporary files
+temp/

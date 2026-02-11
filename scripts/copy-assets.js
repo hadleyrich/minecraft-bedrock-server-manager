@@ -14,6 +14,15 @@ async function copyAssets() {
     try {
         console.log('📦 Copying assets to public directory...\n');
 
+        // Copy index.html from src
+        console.log('  ➜ Copying index.html...');
+        await fs.copy(
+            path.join(__dirname, '../src/index.html'),
+            path.join(publicDir, 'index.html'),
+            { overwrite: true }
+        );
+        console.log('     ✅ index.html copied');
+
         // Copy SweetAlert2 styles and assets
         console.log('  ➜ SweetAlert2 assets...');
         await fs.copy(
