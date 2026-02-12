@@ -354,9 +354,6 @@ app.use(cors({
 
 // Handle preflight OPTIONS requests
 app.options('*', cors());
-  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
-  res.status(200).end();
-});
 
 app.use(express.json({ limit: '50mb' })); // Increase JSON payload limit
 app.use(express.urlencoded({ limit: '50mb', extended: true })); // Handle URL-encoded data
@@ -366,7 +363,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Configuration
 const DATA_DIR = process.env.DATA_DIR;
-const BEDROCK_IMAGE = 'itzg/minecraft-bedrock-server';
+const BEDROCK_IMAGE = process.env.BEDROCK_IMAGE || 'itzg/minecraft-bedrock-server';
 const DOCKER_NETWORK = process.env.DOCKER_NETWORK || null;
 const ENABLE_SSH = process.env.ENABLE_SSH === 'true' || process.env.ENABLE_SSH === 'TRUE' || process.env.ENABLE_SSH === '1';
 
@@ -1342,12 +1339,20 @@ app.get('/api/servers/:id/logs', async (req, res) => {
 app.post('/api/servers/:id/command', async (req, res) => {
   try {
     const { command } = req.body;
+    
+    // Validate command input
+    if (!command || typeof command !== 'string' || command.trim().length === 0) {
+      return res.status(400).json({ error: 'Invalid command' });
+    }
+
     const container = await getContainer(req.params.id);
     if (!container) return res.status(404).json({ error: 'Server not found' });
 
     // Use send-command script bundled with itzg/minecraft-bedrock-server
+    // Split on spaces but preserve quoted strings
+    const args = command.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
     const exec = await container.exec({
-      Cmd: ['send-command', ...command.split(' ')],
+      Cmd: ['send-command', ...args],
       AttachStdout: true,
       AttachStderr: true
     });
@@ -1519,9 +1524,14 @@ app.post('/api/servers/:id/players/:playerName/kick', async (req, res) => {
     const container = await getContainer(req.params.id);
     if (!container) return res.status(404).json({ error: 'Server not found' });
 
-    const command = reason ? `kick "${playerName}" ${reason}` : `kick "${playerName}"`;
+    // Build command array safely without shell interpretation
+    const cmdArgs = ['send-command', 'kick', playerName];
+    if (reason) {
+      cmdArgs.push(reason);
+    }
+
     const exec = await container.exec({
-      Cmd: ['send-command', ...command.split(' ')],
+      Cmd: cmdArgs,
       AttachStdout: true,
       AttachStderr: true
     });
@@ -1543,9 +1553,14 @@ app.post('/api/servers/:id/players/:playerName/ban', async (req, res) => {
     const container = await getContainer(req.params.id);
     if (!container) return res.status(404).json({ error: 'Server not found' });
 
-    const command = reason ? `ban "${playerName}" ${reason}` : `ban "${playerName}"`;
+    // Build command array safely without shell interpretation
+    const cmdArgs = ['send-command', 'ban', playerName];
+    if (reason) {
+      cmdArgs.push(reason);
+    }
+
     const exec = await container.exec({
-      Cmd: ['send-command', ...command.split(' ')],
+      Cmd: cmdArgs,
       AttachStdout: true,
       AttachStderr: true
     });
