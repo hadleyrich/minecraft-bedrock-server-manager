@@ -5,11 +5,11 @@ const express = require('express');
 const cors = require('cors');
 const Docker = require('dockerode');
 const fs = require('fs-extra');
-const path = require('path');
+const path = require('node:path');
 const archiver = require('archiver');
 const AdmZip = require('adm-zip');
 const multer = require('multer');
-const { createServer } = require('http');
+const { createServer } = require('node:http');
 const { Server } = require('socket.io');
 
 // Caching for server info and file operations
@@ -519,7 +519,7 @@ app.get('/api/servers', async (req, res) => {
 app.post('/api/servers/import', async (req, res) => {
   try {
     const { containerName } = req.body;
-    if (!containerName || !containerName.trim()) {
+    if (!containerName?.trim()) {
       return res.status(400).json({ error: 'Container name is required' });
     }
 
@@ -527,7 +527,7 @@ app.post('/api/servers/import', async (req, res) => {
 
     // Find the container by name
     const containers = await docker.listContainers({ all: true });
-    const containerInfo = containers.find(c => c.Names && c.Names.includes(`/${trimmedName}`));
+    const containerInfo = containers.find(c => c.Names?.includes(`/${trimmedName}`));
 
     if (!containerInfo) {
       return res.status(404).json({ error: 'Container not found' });
@@ -872,7 +872,7 @@ app.post('/api/servers/:id/start', async (req, res) => {
         res.json({
           message: 'Server started with updated port due to port conflict',
           gamePort: newGamePort,
-          portsUpdated: newGamePort ? true : false
+          portsUpdated: !!newGamePort
         });
       } else {
         // Re-throw non-port related errors
@@ -919,7 +919,7 @@ app.post('/api/servers/:id/restart', async (req, res) => {
 app.post('/api/servers/:id/rename', async (req, res) => {
   try {
     const { name } = req.body;
-    if (!name || !name.trim()) {
+    if (!name?.trim()) {
       return res.status(400).json({ error: 'Server name is required' });
     }
 
@@ -1047,7 +1047,7 @@ app.post('/api/servers/:id/rename', async (req, res) => {
 app.post('/api/servers/:id/version', async (req, res) => {
   try {
     const { version } = req.body;
-    if (!version || !version.trim()) {
+    if (!version?.trim()) {
       return res.status(400).json({ error: 'Version is required' });
     }
 
@@ -1440,7 +1440,7 @@ app.get('/api/servers/:id/players', async (req, res) => {
         }
         if (line) {
           // Split by comma and clean each name
-          const names = line.split(',').map(n => n.replace(/[^\x20-\x7E]/g, '').replace(/"/g, '').trim()).filter(n => n);
+          const names = line.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
           players.push(...names.map(name => ({ name })));
         }
       }
@@ -1500,9 +1500,9 @@ app.get('/api/servers/:id/players', async (req, res) => {
     }
 
     // Mark operators
-    const operatorXuids = permissions.filter(p => p.permission === 'operator').map(p => p.xuid);
+    const operatorXuids = new Set(permissions.filter(p => p.permission === 'operator').map(p => p.xuid));
     players.forEach(player => {
-      player.isOperator = player.xuid && operatorXuids.includes(player.xuid);
+      player.isOperator = player.xuid && operatorXuids.has(player.xuid);
     });
 
     // Update the player count in the servers list for the sidebar
@@ -1828,7 +1828,7 @@ app.post('/api/servers/:id/backups', async (req, res) => {
 
     await fs.ensureDir(backupPath);
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const timestamp = new Date().toISOString().replaceAll(/[:.]/g, '-');
     const backupFile = path.join(backupPath, `backup-${timestamp}.zip`);
 
     const output = fs.createWriteStream(backupFile);
@@ -2066,7 +2066,7 @@ function formatUptime(startedAt) {
 }
 
 async function isPortAvailable(port) {
-  const net = require('net');
+  const net = require('node:net');
   return new Promise((resolve) => {
     const server = net.createServer();
     server.listen(port, '0.0.0.0', () => {
@@ -2079,7 +2079,7 @@ async function isPortAvailable(port) {
 }
 
 async function findAvailablePort(startPort) {
-  const net = require('net');
+  const net = require('node:net');
 
   // First, get all currently allocated ports from running containers
   const containers = await docker.listContainers({ all: false }); // Only running containers
@@ -2204,9 +2204,9 @@ async function parseManifestJson(manifestPath) {
     // - Single-line comments (//)
     // - Multi-line comments (/* */)
     const cleanedContent = content
-      .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
-      .replace(/\/\/.*/g, '') // Remove single-line comments
-      .replace(/\/\*[\s\S]*?\*\//g, ''); // Remove multi-line comments
+      .replaceAll(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+      .replaceAll(/\/\/.*/g, '') // Remove single-line comments
+      .replaceAll(/\/\*[\s\S]*?\*\//g, ''); // Remove multi-line comments
     return JSON.parse(cleanedContent);
   } catch (err) {
     throw new Error(`Failed to parse manifest: ${err.message}`);
@@ -2220,10 +2220,10 @@ function generatePackFolderName(addonName, suffix) {
 
   // Sanitize name: replace spaces and special chars with underscores
   baseName = baseName
-    .replace(/[^a-zA-Z0-9\s\-_]/g, '') // Remove special chars except space, dash, underscore
-    .replace(/\s+/g, '_') // Replace spaces with underscores
-    .replace(/_+/g, '_') // Replace multiple underscores with single
-    .replace(/^_+|_+$/g, ''); // Trim underscores from start/end
+    .replaceAll(/[^a-zA-Z0-9\s\-_]/g, '') // Remove special chars except space, dash, underscore
+    .replaceAll(/\s+/g, '_') // Replace spaces with underscores
+    .replaceAll(/_+/g, '_') // Replace multiple underscores with single
+    .replaceAll(/^(_+)|(_+)$/g, ''); // Trim underscores from start/end
 
   // Ensure baseName is not empty
   if (!baseName) {
@@ -2348,10 +2348,10 @@ app.get('/api/servers/:id/addons', async (req, res) => {
     // Create UUID map for dependency linking
     const uuidMap = new Map();
     addonMap.forEach((addon, name) => {
-      if (addon.behaviorPack && addon.behaviorPack.uuid) {
+      if (addon.behaviorPack?.uuid) {
         uuidMap.set(addon.behaviorPack.uuid, { type: 'behavior', name, addon });
       }
-      if (addon.resourcePack && addon.resourcePack.uuid) {
+      if (addon.resourcePack?.uuid) {
         uuidMap.set(addon.resourcePack.uuid, { type: 'resource', name, addon });
       }
     });
@@ -2359,7 +2359,7 @@ app.get('/api/servers/:id/addons', async (req, res) => {
     // Link addons by dependencies
     // Process behavior packs depending on resource packs
     addonMap.forEach((addon, name) => {
-      if (addon.behaviorPack && addon.behaviorPack.manifest && addon.behaviorPack.manifest.dependencies) {
+      if (addon.behaviorPack?.manifest?.dependencies) {
         for (const dep of addon.behaviorPack.manifest.dependencies) {
           if (uuidMap.has(dep.uuid)) {
             const depPack = uuidMap.get(dep.uuid);
@@ -2377,7 +2377,7 @@ app.get('/api/servers/:id/addons', async (req, res) => {
 
     // Process resource packs depending on behavior packs
     addonMap.forEach((addon, name) => {
-      if (addon.resourcePack && addon.resourcePack.manifest && addon.resourcePack.manifest.dependencies) {
+      if (addon.resourcePack?.manifest?.dependencies) {
         for (const dep of addon.resourcePack.manifest.dependencies) {
           if (uuidMap.has(dep.uuid)) {
             const depPack = uuidMap.get(dep.uuid);
@@ -2504,7 +2504,7 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
       let processedItems = 0;
 
       // Generate base name for this mcaddon file (without suffix)
-      const baseName = path.basename(originalName, ext).replace(/[^a-zA-Z0-9\s\-_]/g, '').replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+      const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)|(_+)$/g, '');
       const addonBaseName = baseName || 'unknown_addon';
 
       for (const item of extractedItems) {
@@ -3145,7 +3145,7 @@ async function broadcastServerDetails(serverId) {
                 break;
               }
               if (line) {
-                const names = line.split(',').map(n => n.replace(/[^\x20-\x7E]/g, '').replace(/"/g, '').trim()).filter(n => n);
+                const names = line.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
                 players_temp.push(...names.map(name => ({ name })));
               }
             }
@@ -3195,9 +3195,9 @@ async function broadcastServerDetails(serverId) {
             console.error(`Failed to read permissions:`, err.message);
           }
 
-          const operatorXuids = permissions.filter(p => p.permission === 'operator').map(p => p.xuid);
+          const operatorXuids = new Set(permissions.filter(p => p.permission === 'operator').map(p => p.xuid));
           players_temp.forEach(player => {
-            player.isOperator = player.xuid && operatorXuids.includes(player.xuid);
+            player.isOperator = player.xuid && operatorXuids.has(player.xuid);
           });
 
           players = players_temp;
