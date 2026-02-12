@@ -3,6 +3,9 @@ FROM node:24-alpine
 LABEL maintainer="Minecraft Bedrock Server Manager"
 LABEL description="Web-based manager for Docker-based Minecraft Bedrock servers"
 
+# Enable strict error handling
+SHELL ["/bin/sh", "-e", "-c"]
+
 RUN apk add --no-cache shadow su-exec
 
 WORKDIR /app

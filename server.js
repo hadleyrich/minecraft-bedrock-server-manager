@@ -153,10 +153,14 @@ async function getCachedServerInfo(serverId) {
     const content = await readCachedFile(configPath);
     const maxPlayersMatch = content.match(/max-players=(\d+)/);
     if (maxPlayersMatch) {
-      maxPlayers = parseInt(maxPlayersMatch[1]);
+      maxPlayers = Number.parseInt(maxPlayersMatch[1]);
     }
   } catch (err) {
-    console.error(`Failed to read max players for ${serverId}:`, err.message);
+    // Silently ignore ENOENT errors (file not found) - common for newly started containers
+    // that haven't initialized yet
+    if (err.code !== 'ENOENT') {
+      console.error(`Failed to read max players for ${serverId}:`, err.message);
+    }
   }
 
   // Convert ports to array format matching listContainers
@@ -167,8 +171,8 @@ async function getCachedServerInfo(serverId) {
       for (const binding of bindings) {
         ports.push({
           IP: binding.HostIp || '0.0.0.0',
-          PrivatePort: parseInt(key.split('/')[0]),
-          PublicPort: parseInt(binding.HostPort),
+          PrivatePort: Number.parseInt(key.split('/')[0]),
+          PublicPort: Number.parseInt(binding.HostPort),
           Type: key.split('/')[1]
         });
       }
@@ -264,21 +268,21 @@ function validateMemory(memory) {
   // Memory should be a positive number in bytes, reasonable limits (256MB to 32GB)
   const min = 256 * 1024 * 1024; // 256MB
   const max = 32 * 1024 * 1024 * 1024; // 32GB
-  const memNum = parseInt(memory);
-  return !isNaN(memNum) && memNum >= min && memNum <= max;
+  const memNum = Number.parseInt(memory);
+  return !Number.isNaN(memNum) && memNum >= min && memNum <= max;
 }
 
 function validatePort(port) {
-  const portNum = parseInt(port);
-  return !isNaN(portNum) && portNum >= 1024 && portNum <= 65535;
+  const portNum = Number.parseInt(port);
+  return !Number.isNaN(portNum) && portNum >= 1024 && portNum <= 65535;
 }
 
 const app = express();
 const server = createServer(app);
 
 // CORS configuration - restrict to same origin or localhost for security
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',') 
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
   : ['http://localhost:3001', 'http://127.0.0.1:3001'];
 
 const io = new Server(server, {
@@ -321,7 +325,7 @@ if (process.env.DOCKER_HOST) {
   const dockerHost = process.env.DOCKER_HOST;
   if (dockerHost.startsWith('tcp://')) {
     const url = new URL(dockerHost);
-    dockerConfig = { host: url.hostname, port: parseInt(url.port) };
+    dockerConfig = { host: url.hostname, port: Number.parseInt(url.port) };
   } else if (dockerHost.startsWith('unix://')) {
     dockerConfig = { socketPath: dockerHost.substring(7) };
   } else {
@@ -351,9 +355,6 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
-
-// Handle preflight OPTIONS requests
-app.options('*', cors());
 
 app.use(express.json({ limit: '50mb' })); // Increase JSON payload limit
 app.use(express.urlencoded({ limit: '50mb', extended: true })); // Handle URL-encoded data
@@ -679,7 +680,7 @@ app.post('/api/servers/import', async (req, res) => {
 app.post('/api/servers', async (req, res) => {
   try {
     const { name, version = 'LATEST', network } = req.body;
-    
+
     // Validate inputs
     if (!validateServerName(name)) {
       return res.status(400).json({ error: 'Invalid server name. Must be 1-100 characters and not contain special characters.' });
@@ -704,9 +705,6 @@ app.post('/api/servers', async (req, res) => {
       updatedAt: new Date().toISOString()
     };
     await fs.writeJson(metadataPath, metadata, { spaces: 2 });
-
-    // Find available port
-    const gamePort = await findAvailablePort(19132);
 
     // Pull the Docker image if not available
     try {
@@ -735,9 +733,6 @@ app.post('/api/servers', async (req, res) => {
       Env: buildContainerEnv({ version: version, name: name }),
       HostConfig: {
         Binds: [`${hostServerPath}:/data`],
-        PortBindings: {
-          '19132/udp': [{ HostPort: gamePort.toString() }]
-        },
         RestartPolicy: {
           Name: 'unless-stopped'
         },
@@ -745,10 +740,14 @@ app.post('/api/servers', async (req, res) => {
       }
     };
 
-    applyNetworkConfig(containerConfig, { network });
+    // Apply network configuration
+    applyNetworkConfig(containerConfig, metadata);
 
+    // Apply port configuration (handles both port mapping and network-based configurations)
+    const gamePort = await applyPortConfig(containerConfig, metadata);
+
+    // Create and start container
     const container = await docker.createContainer(containerConfig);
-
     await container.start();
 
     // Update metadata with actual container name
@@ -1339,7 +1338,7 @@ app.get('/api/servers/:id/logs', async (req, res) => {
 app.post('/api/servers/:id/command', async (req, res) => {
   try {
     const { command } = req.body;
-    
+
     // Validate command input
     if (!command || typeof command !== 'string' || command.trim().length === 0) {
       return res.status(400).json({ error: 'Invalid command' });
