@@ -30,6 +30,39 @@ function debounce(func, wait) {
   };
 }
 
+// Properly decode Docker multiplexed stream (handles both stdout/stderr)
+function demuxDockerStream(buffer) {
+  const lines = [];
+  let offset = 0;
+
+  while (offset < buffer.length) {
+    // Docker stream format: [stream_type(1)][reserved(3)][payload_length(4)][payload]
+    if (offset + 8 > buffer.length) break;
+
+    // Read the 8-byte header
+    const streamType = buffer[offset];
+    const payloadLength = buffer.readUInt32BE(offset + 4);
+
+    // Skip header and read payload
+    offset += 8;
+    if (offset + payloadLength > buffer.length) break;
+
+    const payload = buffer.toString('utf8', offset, offset + payloadLength);
+    offset += payloadLength;
+
+    // Split payload into lines and add non-empty ones
+    const payloadLines = payload.split('\n');
+    for (const line of payloadLines) {
+      const trimmed = line.trim();
+      if (trimmed) {
+        lines.push(trimmed);
+      }
+    }
+  }
+
+  return lines;
+}
+
 // Cached file read helper
 async function readCachedFile(filePath, parser = 'text') {
   const cacheKey = `${filePath}:${parser}`;
@@ -116,8 +149,7 @@ async function getCachedServerInfo(serverId) {
           stderr: true,
           tail: 20
         });
-        const logText = logs.toString();
-        const lines = logText.trim().split('\n');
+        const lines = demuxDockerStream(logs);
         let lastIndex = -1;
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].includes('players online:')) {
@@ -1568,7 +1600,7 @@ app.get('/api/servers/:id/logs', async (req, res) => {
       tail: 100
     });
 
-    const logLines = logs.toString().split('\n').filter(l => l.trim());
+    const logLines = demuxDockerStream(logs);
     res.json(logLines);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1658,9 +1690,7 @@ app.get('/api/servers/:id/players', async (req, res) => {
       return res.json([]);
     }
 
-    const logText = logs.toString();
-
-    const lines = logText.trim().split('\n');
+    const lines = demuxDockerStream(logs);
     const players = [];
 
     // Find the LAST line with player list from the command output (most recent)
@@ -3345,7 +3375,7 @@ async function broadcastServerDetails(serverId) {
           stderr: true,
           tail: 50
         });
-        const logLines = logs.toString().split('\n').filter(l => l.trim());
+        const logLines = demuxDockerStream(logs);
 
         let players = [];
         const containerInfo = await container.inspect();
@@ -3368,8 +3398,7 @@ async function broadcastServerDetails(serverId) {
             return;
           }
 
-          const logText = logs.toString();
-          const lines = logText.trim().split('\n');
+          const lines = demuxDockerStream(logs);
           const players_temp = [];
 
           let lastIndex = -1;
