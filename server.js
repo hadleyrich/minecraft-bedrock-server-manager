@@ -2712,6 +2712,133 @@ app.options('/api/servers/:id/addons/upload', (req, res) => {
   res.status(200).end();
 });
 
+// Helper: Process mcaddon file extraction
+async function processMcAddon(filePath, originalName, paths, serverId, io) {
+  const ext = path.extname(originalName).toLowerCase();
+  const tempExtractPath = path.join('./temp', `extract-${Date.now()}`);
+  await fs.ensureDir(tempExtractPath);
+
+  const zip = new AdmZip(filePath);
+  zip.extractAllTo(tempExtractPath, true);
+
+  io.emit('upload-progress', {
+    serverId,
+    status: 'processing',
+    filename: originalName,
+    progress: 50
+  });
+
+  const extractedItems = await fs.readdir(tempExtractPath);
+  let processedItems = 0;
+
+  // Generate base name for this mcaddon file (without suffix)
+  const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)$|^(_+)|(_+)$/g, '');
+  const addonBaseName = baseName || 'unknown_addon';
+
+  for (const item of extractedItems) {
+    const itemPath = path.join(tempExtractPath, item);
+    const stats = await fs.stat(itemPath);
+
+    if (stats.isDirectory()) {
+      if (item === 'behavior_packs' || item === 'behavior_pack') {
+        const behaviorItems = await fs.readdir(itemPath);
+        for (const pack of behaviorItems) {
+          const sourcePath = path.join(itemPath, pack);
+          const folderName = await generateUniquePackFolderName(paths.behaviorPacks, addonBaseName, '');
+          const destPath = path.join(paths.behaviorPacks, folderName);
+          await fs.copy(sourcePath, destPath, { overwrite: true });
+          processedItems++;
+        }
+      } else if (item === 'resource_packs' || item === 'resource_pack') {
+        const resourceItems = await fs.readdir(itemPath);
+        for (const pack of resourceItems) {
+          const sourcePath = path.join(itemPath, pack);
+          const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
+          const destPath = path.join(paths.resourcePacks, folderName);
+          await fs.copy(sourcePath, destPath, { overwrite: true });
+          processedItems++;
+        }
+      } else {
+        const manifestPath = path.join(itemPath, 'manifest.json');
+        if (await fs.pathExists(manifestPath)) {
+          try {
+            const manifest = await parseManifestJson(manifestPath);
+            const modules = manifest.modules || [];
+            const isBehavior = modules.some(m => m.type === 'data' || m.type === 'javascript' || m.type === 'script');
+            const targetPath = isBehavior ? paths.behaviorPacks : paths.resourcePacks;
+            const folderName = await generateUniquePackFolderName(targetPath, addonBaseName, '');
+            const destPath = path.join(targetPath, folderName);
+            await fs.copy(itemPath, destPath, { overwrite: true });
+            processedItems++;
+          } catch (err) {
+            console.warn('Failed to copy to world path, falling back to resource_packs:', err.message);
+            const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
+            const destPath = path.join(paths.resourcePacks, folderName);
+            await fs.copy(itemPath, destPath, { overwrite: true });
+            processedItems++;
+          }
+        }
+      }
+    }
+  }
+
+  await fs.remove(tempExtractPath);
+  return processedItems;
+}
+
+// Helper: Process mcpack file extraction
+async function processMcPack(filePath, originalName, targetDir) {
+  const ext = path.extname(originalName).toLowerCase();
+  const baseName = path.basename(originalName, ext);
+  const tempExtractPath = path.join('./temp', `extract-${Date.now()}`);
+  await fs.ensureDir(tempExtractPath);
+
+  const zip = new AdmZip(filePath);
+  zip.extractAllTo(tempExtractPath, true);
+
+  const extractedItems = await fs.readdir(tempExtractPath);
+  const manifestPath = path.join(tempExtractPath, 'manifest.json');
+
+  if (await fs.pathExists(manifestPath)) {
+    // Direct content: create folder and move content into it
+    const folderName = await generateUniquePackFolderName(targetDir, baseName, '');
+    const newFolderPath = path.join(tempExtractPath, folderName);
+    await fs.ensureDir(newFolderPath);
+
+    // Move all items to new folder
+    for (const item of extractedItems) {
+      const src = path.join(tempExtractPath, item);
+      const dest = path.join(newFolderPath, item);
+      await fs.move(src, dest);
+    }
+
+    // Copy the new folder to targetDir
+    await fs.copy(newFolderPath, path.join(targetDir, folderName), { overwrite: true });
+  } else {
+    // Assume folders: rename each folder
+    for (const item of extractedItems) {
+      const itemPath = path.join(tempExtractPath, item);
+      const stats = await fs.stat(itemPath);
+      if (stats.isDirectory()) {
+        const folderName = await generateUniquePackFolderName(targetDir, baseName, '');
+        const destPath = path.join(targetDir, folderName);
+        await fs.copy(itemPath, destPath, { overwrite: true });
+      }
+    }
+  }
+
+  await fs.remove(tempExtractPath);
+}
+
+// Helper: Process mcworld or mctemplate file extraction
+async function processMcWorld(filePath, originalName, targetDir) {
+  const ext = path.extname(originalName).toLowerCase();
+  const worldName = path.basename(originalName, ext);
+  const extractPath = path.join(targetDir, worldName);
+  const zip = new AdmZip(filePath);
+  zip.extractAllTo(extractPath, true);
+}
+
 app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (req, res) => {
   res.setHeader('X-Max-Upload-Size', '500MB');
   res.setHeader('Accept-Ranges', 'bytes');
@@ -2775,120 +2902,13 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
       progress: 25
     });
 
+    // Process based on file type
     if (ext === '.mcaddon') {
-      const tempExtractPath = path.join('./temp', `extract-${Date.now()}`);
-      await fs.ensureDir(tempExtractPath);
-
-      const zip = new AdmZip(req.file.path);
-      zip.extractAllTo(tempExtractPath, true);
-
-      io.emit('upload-progress', {
-        serverId,
-        status: 'processing',
-        filename: originalName,
-        progress: 50
-      });
-
-      const extractedItems = await fs.readdir(tempExtractPath);
-      let processedItems = 0;
-
-      // Generate base name for this mcaddon file (without suffix)
-      const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)$|^(_+)|(_+)$/g, '');
-      const addonBaseName = baseName || 'unknown_addon';
-
-      for (const item of extractedItems) {
-        const itemPath = path.join(tempExtractPath, item);
-        const stats = await fs.stat(itemPath);
-
-        if (stats.isDirectory()) {
-          if (item === 'behavior_packs' || item === 'behavior_pack') {
-            const behaviorItems = await fs.readdir(itemPath);
-            for (const pack of behaviorItems) {
-              const sourcePath = path.join(itemPath, pack);
-              const folderName = await generateUniquePackFolderName(paths.behaviorPacks, addonBaseName, '');
-              const destPath = path.join(paths.behaviorPacks, folderName);
-              await fs.copy(sourcePath, destPath, { overwrite: true });
-              processedItems++;
-            }
-          } else if (item === 'resource_packs' || item === 'resource_pack') {
-            const resourceItems = await fs.readdir(itemPath);
-            for (const pack of resourceItems) {
-              const sourcePath = path.join(itemPath, pack);
-              const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
-              const destPath = path.join(paths.resourcePacks, folderName);
-              await fs.copy(sourcePath, destPath, { overwrite: true });
-              processedItems++;
-            }
-          } else {
-            const manifestPath = path.join(itemPath, 'manifest.json');
-            if (await fs.pathExists(manifestPath)) {
-              try {
-                const manifest = await parseManifestJson(manifestPath);
-                const modules = manifest.modules || [];
-                const isBehavior = modules.some(m => m.type === 'data' || m.type === 'javascript' || m.type === 'script');
-                const targetPath = isBehavior ? paths.behaviorPacks : paths.resourcePacks;
-                const folderName = await generateUniquePackFolderName(targetPath, addonBaseName, '');
-                const destPath = path.join(targetPath, folderName);
-                await fs.copy(itemPath, destPath, { overwrite: true });
-                processedItems++;
-              } catch (err) {
-                console.warn('Failed to copy to world path, falling back to resource_packs:', err.message);
-                const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
-                const destPath = path.join(paths.resourcePacks, folderName);
-                await fs.copy(itemPath, destPath, { overwrite: true });
-                processedItems++;
-              }
-            }
-          }
-        }
-      }
-
-      await fs.remove(tempExtractPath);
+      await processMcAddon(req.file.path, originalName, paths, serverId, io);
     } else if (ext === '.mcpack') {
-      const baseName = path.basename(originalName, ext);
-      const tempExtractPath = path.join('./temp', `extract-${Date.now()}`);
-      await fs.ensureDir(tempExtractPath);
-
-      const zip = new AdmZip(req.file.path);
-      zip.extractAllTo(tempExtractPath, true);
-
-      const extractedItems = await fs.readdir(tempExtractPath);
-      const manifestPath = path.join(tempExtractPath, 'manifest.json');
-
-      if (await fs.pathExists(manifestPath)) {
-        // Direct content: create folder and move content into it
-        const folderName = await generateUniquePackFolderName(targetDir, baseName, '');
-        const newFolderPath = path.join(tempExtractPath, folderName);
-        await fs.ensureDir(newFolderPath);
-
-        // Move all items to new folder
-        for (const item of extractedItems) {
-          const src = path.join(tempExtractPath, item);
-          const dest = path.join(newFolderPath, item);
-          await fs.move(src, dest);
-        }
-
-        // Copy the new folder to targetDir
-        await fs.copy(newFolderPath, path.join(targetDir, folderName), { overwrite: true });
-      } else {
-        // Assume folders: rename each folder
-        for (const item of extractedItems) {
-          const itemPath = path.join(tempExtractPath, item);
-          const stats = await fs.stat(itemPath);
-          if (stats.isDirectory()) {
-            const folderName = await generateUniquePackFolderName(targetDir, baseName, '');
-            const destPath = path.join(targetDir, folderName);
-            await fs.copy(itemPath, destPath, { overwrite: true });
-          }
-        }
-      }
-
-      await fs.remove(tempExtractPath);
+      await processMcPack(req.file.path, originalName, targetDir);
     } else if (ext === '.mcworld' || ext === '.mctemplate') {
-      const worldName = path.basename(originalName, ext);
-      const extractPath = path.join(targetDir, worldName);
-      const zip = new AdmZip(req.file.path);
-      zip.extractAllTo(extractPath, true);
+      await processMcWorld(req.file.path, originalName, targetDir);
     }
 
     io.emit('upload-progress', {
@@ -3353,6 +3373,117 @@ async function broadcastServerUpdate(serverId = null) {
   debouncedBroadcastServerUpdate(serverId);
 }
 
+// Helper: Extract player names from server logs
+function extractPlayerNamesFromLogs(lines) {
+  const players_temp = [];
+  let lastIndex = -1;
+  
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('players online:')) {
+      lastIndex = i;
+    }
+  }
+
+  if (lastIndex >= 0) {
+    for (let i = lastIndex + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
+        break;
+      }
+      if (line) {
+        const names = line.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
+        players_temp.push(...names.map(name => ({ name })));
+      }
+    }
+  }
+  
+  return players_temp;
+}
+
+// Helper: Load and update player cache with XUIDs
+async function loadAndUpdatePlayerCache(serverId, players) {
+  const cachePath = path.join(getServerPath(serverId), 'player_cache.json');
+  let playerCache = {};
+  
+  try {
+    if (await fs.pathExists(cachePath)) {
+      const cacheContent = await fs.readFile(cachePath, 'utf8');
+      playerCache = JSON.parse(cacheContent);
+    }
+  } catch (err) {
+    console.error(`Failed to read player cache:`, err.message);
+  }
+
+  const uncachedPlayers = players.filter(p => !playerCache[p.name]);
+
+  if (uncachedPlayers.length > 0) {
+    const xuidResults = await fetchXuidsBatch(uncachedPlayers);
+
+    for (const result of xuidResults) {
+      playerCache[result.name] = result.xuid;
+    }
+
+    try {
+      await fs.writeJson(cachePath, playerCache, { spaces: 2 });
+    } catch (err) {
+      console.error(`Failed to write player cache:`, err.message);
+    }
+  }
+
+  // Apply cached XUIDs to players
+  players.forEach(player => {
+    if (playerCache[player.name]) {
+      player.xuid = playerCache[player.name];
+    }
+  });
+  
+  return players;
+}
+
+// Helper: Load permissions and mark operators
+async function markOperators(serverId, players) {
+  let permissions = [];
+  try {
+    const permissionsPath = path.join(getServerPath(serverId), 'permissions.json');
+    if (await fs.pathExists(permissionsPath)) {
+      const permissionsContent = await fs.readFile(permissionsPath, 'utf8');
+      permissions = JSON.parse(permissionsContent);
+    }
+  } catch (err) {
+    console.error(`Failed to read permissions:`, err.message);
+  }
+
+  const operatorXuids = new Set(permissions.filter(p => p.permission === 'operator').map(p => p.xuid));
+  players.forEach(player => {
+    player.isOperator = player.xuid && operatorXuids.has(player.xuid);
+  });
+  
+  return players;
+}
+
+// Helper: Load server configuration
+async function loadServerConfig(serverId) {
+  let config = {};
+  try {
+    const serverPath = getServerPath(serverId);
+    const configPath = path.join(serverPath, 'server.properties');
+    if (await fs.pathExists(configPath)) {
+      const content = await fs.readFile(configPath, 'utf8');
+      content.split('\n').forEach(line => {
+        if (line.trim() && !line.startsWith('#')) {
+          const [key, value] = line.split('=');
+          if (key && value !== undefined) {
+            config[key.trim()] = value.trim();
+          }
+        }
+      });
+    }
+  } catch (err) {
+    console.error(`Failed to read server config:`, err.message);
+  }
+  return config;
+}
+
 // Helper function to broadcast server details with timeout
 async function broadcastServerDetails(serverId) {
   try {
@@ -3391,98 +3522,17 @@ async function broadcastServerDetails(serverId) {
           }
 
           const lines = demuxDockerStream(logs);
-          const players_temp = [];
-
-          let lastIndex = -1;
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes('players online:')) {
-              lastIndex = i;
-            }
+          let players_temp = extractPlayerNamesFromLogs(lines);
+          
+          if (players_temp.length > 0) {
+            players_temp = await loadAndUpdatePlayerCache(serverId, players_temp);
+            players_temp = await markOperators(serverId, players_temp);
           }
-
-          if (lastIndex >= 0) {
-            for (let i = lastIndex + 1; i < lines.length; i++) {
-              const line = lines[i].trim();
-              if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
-                break;
-              }
-              if (line) {
-                const names = line.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
-                players_temp.push(...names.map(name => ({ name })));
-              }
-            }
-          }
-
-          let playerCache = {};
-          const cachePath = path.join(getServerPath(serverId), 'player_cache.json');
-          try {
-            if (await fs.pathExists(cachePath)) {
-              const cacheContent = await fs.readFile(cachePath, 'utf8');
-              playerCache = JSON.parse(cacheContent);
-            }
-          } catch (err) {
-            console.error(`Failed to read player cache:`, err.message);
-          }
-
-          const uncachedPlayers = players_temp.filter(p => !playerCache[p.name]);
-
-          if (uncachedPlayers.length > 0) {
-            const xuidResults = await fetchXuidsBatch(uncachedPlayers);
-
-            for (const result of xuidResults) {
-              playerCache[result.name] = result.xuid;
-            }
-
-            try {
-              await fs.writeJson(cachePath, playerCache, { spaces: 2 });
-            } catch (err) {
-              console.error(`Failed to write player cache:`, err.message);
-            }
-          }
-
-          players_temp.forEach(player => {
-            if (playerCache[player.name]) {
-              player.xuid = playerCache[player.name];
-            }
-          });
-
-          let permissions = [];
-          try {
-            const permissionsPath = path.join(getServerPath(serverId), 'permissions.json');
-            if (await fs.pathExists(permissionsPath)) {
-              const permissionsContent = await fs.readFile(permissionsPath, 'utf8');
-              permissions = JSON.parse(permissionsContent);
-            }
-          } catch (err) {
-            console.error(`Failed to read permissions:`, err.message);
-          }
-
-          const operatorXuids = new Set(permissions.filter(p => p.permission === 'operator').map(p => p.xuid));
-          players_temp.forEach(player => {
-            player.isOperator = player.xuid && operatorXuids.has(player.xuid);
-          });
-
+          
           players = players_temp;
         }
 
-        let config = {};
-        try {
-          const serverPath = getServerPath(serverId);
-          const configPath = path.join(serverPath, 'server.properties');
-          if (await fs.pathExists(configPath)) {
-            const content = await fs.readFile(configPath, 'utf8');
-            content.split('\n').forEach(line => {
-              if (line.trim() && !line.startsWith('#')) {
-                const [key, value] = line.split('=');
-                if (key && value !== undefined) {
-                  config[key.trim()] = value.trim();
-                }
-              }
-            });
-          }
-        } catch (err) {
-          console.error(`Failed to read server config:`, err.message);
-        }
+        const config = await loadServerConfig(serverId);
 
         io.emit('server-details-update', {
           serverId,
