@@ -125,12 +125,15 @@ async function getCachedServerInfo(serverId) {
           }
         }
         if (lastIndex >= 0) {
-          for (let i = lastIndex + 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
-              break;
+          // Extract player names from the same line (format: "There are X/Y players online: player1, player2, ...")
+          const line = lines[lastIndex];
+          const colonIndex = line.indexOf('players online:');
+          if (colonIndex >= 0) {
+            const playersPart = line.substring(colonIndex + 'players online:'.length).trim();
+            if (playersPart) {
+              const names = playersPart.split(',').map(n => n.trim()).filter(Boolean);
+              playerCount = names.length;
             }
-            if (line) playerCount++;
           }
         }
         return playerCount;
@@ -1456,16 +1459,14 @@ app.get('/api/servers/:id/players', async (req, res) => {
     }
 
     if (lastIndex >= 0) {
-      // Parse players from the last list output
-      for (let i = lastIndex + 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        // Stop if it's a log line (starts with [ or >) or other messages
-        if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
-          break;
-        }
-        if (line) {
+      // Parse players from the same line (format: "There are X/Y players online: player1, player2, ...")
+      const line = lines[lastIndex];
+      const colonIndex = line.indexOf('players online:');
+      if (colonIndex >= 0) {
+        const playersPart = line.substring(colonIndex + 'players online:'.length).trim();
+        if (playersPart) {
           // Split by comma and clean each name
-          const names = line.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
+          const names = playersPart.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
           players.push(...names.map(name => ({ name })));
         }
       }
@@ -3164,13 +3165,13 @@ async function broadcastServerDetails(serverId) {
           }
 
           if (lastIndex >= 0) {
-            for (let i = lastIndex + 1; i < lines.length; i++) {
-              const line = lines[i].trim();
-              if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
-                break;
-              }
-              if (line) {
-                const names = line.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
+            // Parse players from the same line (format: "There are X/Y players online: player1, player2, ...")
+            const line = lines[lastIndex];
+            const colonIndex = line.indexOf('players online:');
+            if (colonIndex >= 0) {
+              const playersPart = line.substring(colonIndex + 'players online:'.length).trim();
+              if (playersPart) {
+                const names = playersPart.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
                 players_temp.push(...names.map(name => ({ name })));
               }
             }
