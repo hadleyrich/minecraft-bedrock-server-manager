@@ -568,6 +568,25 @@
         return 0;
       }
 
+      // Generate server status control buttons based on server status
+      function getServerStatusButtons(status) {
+        if (status === "running") {
+          return `
+            <button onclick="serverAction('restart')" class="px-2 md:px-2.5 py-1.5 text-xs md:text-sm bg-yellow-600 hover:bg-yellow-700 rounded-lg whitespace-nowrap">
+                🔄 <span class="hidden sm:inline">Restart</span>
+            </button>
+            <button onclick="serverAction('stop')" class="px-2 md:px-2.5 py-1.5 text-xs md:text-sm bg-red-600 hover:bg-red-700 rounded-lg whitespace-nowrap">
+                ⏹️ <span class="hidden sm:inline">Stop</span>
+            </button>
+          `;
+        }
+        return `
+          <button onclick="serverAction('start')" class="px-2 md:px-2.5 py-1.5 text-xs md:text-sm bg-green-600 hover:bg-green-700 rounded-lg whitespace-nowrap">
+              ▶️ <span class="hidden sm:inline">Start</span>
+          </button>
+        `;
+      }
+
       // Update login button state based on lockout
       function updateLoginButtonState() {
         const loginButton = document.getElementById("loginButton");
@@ -1118,6 +1137,28 @@
               confirmButtonText: "Yes, delete it!",
             });
             if (!result.isConfirmed) return;
+          } else if (action === "recreate") {
+            const server = state.servers.find(
+              (s) => s.id === state.selectedServer,
+            );
+            const serverName = server ? server.name : "this server";
+            const isRunning = server && server.status === "running";
+            let html = `Recreate the Docker container for "${serverName}" using existing configuration?<br><br>`;
+            if (isRunning) {
+              html += `<small class="text-gray-400">The running container will be stopped and removed, then recreated with your current settings.</small>`;
+            } else {
+              html += `<small class="text-gray-400">ℹThe container will be recreated with your current server settings. This is useful for fixing permission issues or corrupted containers.</small>`;
+            }
+            const result = await Swal.fire({
+              title: "Recreate Container",
+              html: html,
+              icon: isRunning ? "warning" : "question",
+              showCancelButton: true,
+              confirmButtonColor: "#10b981",
+              cancelButtonColor: "#6b7280",
+              confirmButtonText: "Yes, recreate it!",
+            });
+            if (!result.isConfirmed) return;
           } else if (
             action === "start" ||
             action === "stop" ||
@@ -1229,11 +1270,11 @@
           html: `
                     <div class="text-left">
                         <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-300 mb-2">Server Name</label>
+                            <label class="block text-sm font-medium text-gray-400 mb-2">Server Name</label>
                             <input id="swal-server-name" type="text" placeholder="My Minecraft Server" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500 text-white">
                         </div>
                         <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-300 mb-2">Minecraft Version</label>
+                            <label class="block text-sm font-medium text-gray-400 mb-2">Minecraft Version</label>
                             <div class="space-y-2">
                                 <div class="flex gap-2">
                                     <label class="flex items-center">
@@ -1257,7 +1298,7 @@
                             </div>
                         </div>
                         <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-300 mb-2">Docker Network (Optional)</label>
+                            <label class="block text-sm font-medium text-gray-400 mb-2">Docker Network (Optional)</label>
                             <input id="swal-docker-network" type="text" placeholder="e.g. minecraft-network" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500 text-white text-sm">
                             <p class="text-xs text-gray-400 mt-1">Leave empty to use default Docker network</p>
                         </div>
@@ -1352,7 +1393,7 @@
           html: `
                     <div class="text-left">
                         <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-300 mb-2">Current Version: <span class="text-green-400">${currentVersion}</span></label>
+                            <label class="block text-sm font-medium text-gray-400 mb-2">Current Version: <span class="text-green-400">${currentVersion}</span></label>
                             <div class="space-y-2">
                                 <div class="flex gap-2">
                                     <label class="flex items-center">
@@ -1504,7 +1545,7 @@
           html: `
                     <div class="text-left">
                         <div class="mb-4">
-                            <label class="block text-sm font-medium text-gray-300 mb-2">Current Memory: <span class="text-green-400">${currentMemoryMB} MB</span></label>
+                            <label class="block text-sm font-medium text-gray-400 mb-2">Current Memory: <span class="text-green-400">${currentMemoryMB} MB</span></label>
                             <div class="space-y-2">
                                 <div class="flex gap-2">
                                     <label class="flex items-center">
@@ -2673,7 +2714,7 @@
                                 class="w-full text-left p-2 rounded-lg mb-1.5 transition text-sm ${
                                   state.selectedServer === server.id
                                     ? "bg-green-600 text-white"
-                                    : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                                    : "bg-gray-700 hover:bg-gray-600 text-gray-400"
                                 }">
                                 <div class="flex items-center justify-between">
                                     <div>
@@ -2736,6 +2777,10 @@
                                 <span class="hidden sm:inline">📥 Import</span>
                                 <span class="sm:hidden">📥</span>
                             </button>
+                            <button onclick="findOrphanedServers()" class="px-2 md:px-3 py-1.5 text-xs md:text-sm bg-amber-600 hover:bg-amber-700 rounded-lg" title="Find servers with data but no container">
+                                <span class="hidden sm:inline">🔍 Orphaned</span>
+                                <span class="sm:hidden">🔍</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -2757,7 +2802,7 @@
                                     class="w-full text-left p-2 rounded-lg mb-1.5 transition text-sm ${
                                       state.selectedServer === server.id
                                         ? "bg-green-600 text-white"
-                                        : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                                        : "bg-gray-700 hover:bg-gray-600 text-gray-400"
                                     }">
                                     <div class="flex items-center justify-between">
                                         <div>
@@ -2796,27 +2841,18 @@
                                         </div>
                                     </div>
                                     <div class="flex gap-1.5 flex-wrap">
-                                        ${
-                                          currentServer.status === "running"
-                                            ? `
-                                            <button onclick="serverAction('restart')" class="px-2 md:px-2.5 py-1.5 text-xs md:text-sm bg-yellow-600 hover:bg-yellow-700 rounded-lg whitespace-nowrap">
-                                                🔄 <span class="hidden sm:inline">Restart</span>
-                                            </button>
-                                            <button onclick="serverAction('stop')" class="px-2 md:px-2.5 py-1.5 text-xs md:text-sm bg-red-600 hover:bg-red-700 rounded-lg whitespace-nowrap">
-                                                ⏹️ <span class="hidden sm:inline">Stop</span>
-                                            </button>
-                                        `
-                                            : `
-                                            <button onclick="serverAction('start')" class="px-2 md:px-2.5 py-1.5 text-xs md:text-sm bg-green-600 hover:bg-green-700 rounded-lg whitespace-nowrap">
-                                                ▶️ <span class="hidden sm:inline">Start</span>
-                                            </button>
-                                        `
-                                        }
+                                        ${getServerStatusButtons(currentServer.status)}
                                         <button onclick="renameServer()" class="px-2 md:px-2.5 py-1.5 text-xs md:text-sm bg-blue-600 hover:bg-blue-700 rounded-lg whitespace-nowrap">
                                           ✏️ <span class="hidden sm:inline">Rename</span>
                                         </button>
                                         <button onclick="serverAction('delete')" class="px-2 md:px-2.5 py-1.5 text-xs md:text-sm bg-red-600 hover:bg-red-700 rounded-lg whitespace-nowrap">
                                           🗑️ <span class="hidden sm:inline">Delete</span>
+                                        </button>
+                                    </div>
+                                    <!-- Advanced options row -->
+                                    <div class="flex gap-1.5 flex-wrap">
+                                        <button onclick="serverAction('recreate')" class="px-2 md:px-2.5 py-1.5 text-xs md:text-sm bg-orange-600 hover:bg-orange-700 rounded-lg whitespace-nowrap" title="Recreate container (safely stops running container if needed)">
+                                          🔨 <span class="hidden sm:inline">Recreate</span>
                                         </button>
                                     </div>
                                 </div>
@@ -3558,16 +3594,16 @@
                                 <h3 class="text-base font-semibold mb-2">📖 How to Use Addons</h3>
                                 <div class="text-xs text-gray-400 space-y-2">
                                     <div>
-                                        <strong class="text-gray-300">1. Upload Addon:</strong> Click "Upload Addon" and select your .mcaddon, .mcpack, .mcworld, or .mctemplate file.
+                                        <strong class="text-gray-400">1. Upload Addon:</strong> Click "Upload Addon" and select your .mcaddon, .mcpack, .mcworld, or .mctemplate file.
                                     </div>
                                     <div>
-                                        <strong class="text-gray-300">2. Enable Pack:</strong> After uploading, click "Enable" on the behavior or resource pack you want to use.
+                                        <strong class="text-gray-400">2. Enable Pack:</strong> After uploading, click "Enable" on the behavior or resource pack you want to use.
                                     </div>
                                     <div>
-                                        <strong class="text-gray-300">3. Restart Server:</strong> Restart the server for changes to take effect.
+                                        <strong class="text-gray-400">3. Restart Server:</strong> Restart the server for changes to take effect.
                                     </div>
                                     <div>
-                                        <strong class="text-gray-300">4. Join Server:</strong> When connecting, you'll be prompted to "Download & Join" for resource packs. Behavior packs work automatically.
+                                        <strong class="text-gray-400">4. Join Server:</strong> When connecting, you'll be prompted to "Download & Join" for resource packs. Behavior packs work automatically.
                                     </div>
                                     <div class="mt-2 p-2 bg-blue-900/30 rounded-sm">
                                         <strong class="text-blue-400">💡 Tip:</strong> To force resource packs on all clients, set <code class="bg-gray-900 px-1 rounded-sm">texturepack-required=true</code> in the Config tab.
@@ -3797,6 +3833,122 @@
           Swal.fire({
             title: "Import Failed",
             text: "Import failed: " + err.message,
+            icon: "error",
+            confirmButtonColor: "#10b981",
+          });
+        }
+      }
+
+      async function findOrphanedServers() {
+        try {
+          showLoading();
+          const response = await fetch(`${API_BASE}/servers/orphaned`);
+          const orphanedServers = await response.json();
+          hideLoading();
+
+          if (!Array.isArray(orphanedServers) || orphanedServers.length === 0) {
+            Swal.fire({
+              title: "No Orphaned Servers",
+              text: "All your servers have active containers. Great!",
+              icon: "info",
+              confirmButtonColor: "#10b981",
+            });
+            return;
+          }
+
+          // Build HTML for orphaned servers list
+          let html = `<div style="text-align: left; max-height: 400px; overflow-y: auto;">
+            <p style="margin-bottom: 1rem; color: #999;">Found ${orphanedServers.length} server(s) with data but no running container:</p>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+              <thead style="background: #374151; position: sticky; top: 0;">
+                <tr>
+                  <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid #555;">Server Name</th>
+                  <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid #555;">World Size</th>
+                  <th style="padding: 0.5rem; text-align: left; border-bottom: 1px solid #555;">Version</th>
+                </tr>
+              </thead>
+              <tbody>`;
+
+          orphanedServers.forEach((server) => {
+            html += `<tr style="border-bottom: 1px solid #555;">
+              <td style="padding: 0.5rem;">${server.name}</td>
+              <td style="padding: 0.5rem;">${server.worldSize}</td>
+              <td style="padding: 0.5rem;">${server.version}</td>
+            </tr>`;
+          });
+
+          html += `</tbody></table>
+            <p style="margin-top: 1rem; color: #ccc; font-size: 0.85rem;">⚠️ These servers will be recreated with their stored configuration.</p>
+          </div>`;
+
+          Swal.fire({
+            title: "🔍 Orphaned Servers Found",
+            html: html,
+            icon: "question",
+            showCancelButton: true,
+            confirmButtonColor: "#10b981",
+            cancelButtonColor: "#6b7280",
+            confirmButtonText: "Recover All",
+            cancelButtonText: "Cancel",
+          }).then(async (result) => {
+            if (!result.isConfirmed) return;
+
+            try {
+              showLoading();
+              let successCount = 0;
+              let failureCount = 0;
+
+              for (const server of orphanedServers) {
+                try {
+                  const recoverResponse = await fetch(
+                    `${API_BASE}/servers/${server.id}/recreate`,
+                    { method: "POST" },
+                  );
+
+                  if (recoverResponse.ok) {
+                    successCount++;
+                  } else {
+                    failureCount++;
+                    console.error(`Failed to recover ${server.name}`);
+                  }
+                } catch (err) {
+                  failureCount++;
+                  console.error(`Error recovering ${server.name}:`, err);
+                }
+              }
+
+              await fetchServers();
+              hideLoading();
+
+              let resultMsg = `✅ Recovered ${successCount} server(s)`;
+              if (failureCount > 0) {
+                resultMsg += ` with ${failureCount} failure(s)`;
+              }
+
+              Swal.fire({
+                title: "Recovery Complete",
+                text: resultMsg,
+                icon:
+                  successCount === orphanedServers.length ? "success" : "info",
+                confirmButtonColor: "#10b981",
+                timer: 3000,
+                timerProgressBar: true,
+              });
+            } catch (err) {
+              hideLoading();
+              Swal.fire({
+                title: "Recovery Error",
+                text: "Error during recovery: " + err.message,
+                icon: "error",
+                confirmButtonColor: "#10b981",
+              });
+            }
+          });
+        } catch (err) {
+          hideLoading();
+          Swal.fire({
+            title: "Error",
+            text: "Failed to scan for orphaned servers: " + err.message,
             icon: "error",
             confirmButtonColor: "#10b981",
           });

@@ -542,6 +542,80 @@ app.get('/api/servers', async (req, res) => {
   }
 });
 
+// GET /api/servers/orphaned - Find servers with metadata but no container
+app.get('/api/servers/orphaned', async (req, res) => {
+  try {
+    const orphanedServers = [];
+
+    // Check if DATA_DIR exists
+    if (!await fs.pathExists(DATA_DIR)) {
+      return res.json([]);
+    }
+
+    // Get list of existing server IDs from containers
+    const containers = await docker.listContainers({ all: true });
+    const existingServerIds = new Set(
+      containers
+        .filter(c => c.Labels && c.Labels['server-id'])
+        .map(c => c.Labels['server-id'])
+    );
+
+    // Scan DATA_DIR for server directories
+    const items = await fs.readdir(DATA_DIR);
+    const serverDirs = items.filter(item => item.startsWith('bedrock-'));
+
+    // Check each directory
+    for (const serverId of serverDirs) {
+      // Skip if container still exists
+      if (existingServerIds.has(serverId)) {
+        continue;
+      }
+
+      const serverPath = getServerPath(serverId);
+      const metadataPath = path.join(serverPath, 'metadata.json');
+
+      // Must have metadata.json to be considered orphaned
+      if (!await fs.pathExists(metadataPath)) {
+        continue;
+      }
+
+      try {
+        const metadata = await fs.readJson(metadataPath);
+
+        // Get world size
+        let worldSize = '0 MB';
+        try {
+          const worldPath = path.join(serverPath, 'worlds');
+          if (await fs.pathExists(worldPath)) {
+            const size = await getDirectorySize(worldPath);
+            worldSize = formatBytes(size);
+          }
+        } catch (err) {
+          console.error(`Failed to get world size for ${serverId}:`, err.message);
+        }
+
+        orphanedServers.push({
+          id: serverId,
+          name: metadata.name || 'Unnamed Server',
+          version: metadata.version || 'LATEST',
+          memory: formatBytes(metadata.memory || 0),
+          worldSize: worldSize,
+          createdAt: metadata.createdAt || 'Unknown',
+          status: 'orphaned',
+          network: metadata.network || null
+        });
+      } catch (err) {
+        console.error(`Failed to read metadata for orphaned server ${serverId}:`, err.message);
+      }
+    }
+
+    res.json(orphanedServers);
+  } catch (err) {
+    console.error('Error scanning for orphaned servers:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/servers/import - Import existing server
 app.post('/api/servers/import', async (req, res) => {
   try {
@@ -886,6 +960,10 @@ app.post('/api/servers/:id/start', async (req, res) => {
         const networkName = getNetworkName(metadata);
         const newGamePort = await applyNetworkAndPortConfig(containerConfig, networkName);
 
+        // Create and start the new container
+        const newContainer = await docker.createContainer(containerConfig);
+        await newContainer.start();
+
         // Update metadata with actual container name
         const metadataPath2 = path.join(serverPath, 'metadata.json');
         if (await fs.pathExists(metadataPath2)) {
@@ -939,6 +1017,138 @@ app.post('/api/servers/:id/restart', async (req, res) => {
     setTimeout(() => broadcastServerUpdate(req.params.id), 3000);
     res.json({ message: 'Server restarted' });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/servers/:id/recreate - Recreate Docker container from metadata
+app.post('/api/servers/:id/recreate', async (req, res) => {
+  try {
+    const serverId = req.params.id;
+    const serverPath = getServerPath(serverId);
+    const metadataPath = path.join(serverPath, 'metadata.json');
+
+    // Verify server directory exists
+    if (!await fs.pathExists(serverPath)) {
+      return res.status(404).json({ error: 'Server directory not found' });
+    }
+
+    // Check if metadata exists
+    if (!await fs.pathExists(metadataPath)) {
+      return res.status(400).json({ error: 'Server metadata not found. Cannot recreate.' });
+    }
+
+    // Read metadata
+    const metadata = await fs.readJson(metadataPath);
+
+    // Check if container already exists and destroy it first
+    let existingContainer = null;
+    try {
+      const containers = await docker.listContainers({ all: true });
+      const existing = containers.find(c => c.Labels['server-id'] === serverId);
+      existingContainer = existing;
+    } catch (err) {
+      console.error('Failed to check for existing container:', err.message);
+    }
+
+    if (existingContainer) {
+      try {
+        console.log(`Destroying existing container for ${serverId} before recreation...`);
+        const container = docker.getContainer(existingContainer.Id);
+
+        // Stop container if running
+        try {
+          const containerInfo = await container.inspect();
+          if (containerInfo.State.Running) {
+            await container.stop();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        } catch (err) {
+          console.error(`Failed to stop container ${serverId}:`, err.message);
+        }
+
+        // Remove container
+        await container.remove({ force: true });
+        console.log(`Successfully destroyed existing container for ${serverId}`);
+      } catch (err) {
+        console.error(`Error destroying existing container: ${err.message}`);
+        throw new Error(`Failed to destroy existing container: ${err.message}`);
+      }
+    }
+
+    // Get host data path
+    const hostDataPath = await getHostDataPath();
+    const hostServerPath = path.join(hostDataPath, serverId);
+
+    // Pull the Docker image if not available
+    try {
+      console.log(`Pulling Docker image: ${BEDROCK_IMAGE}`);
+      await docker.getImage(BEDROCK_IMAGE).inspect();
+    } catch (err) {
+      console.log(`Image not found locally, pulling ${BEDROCK_IMAGE}...`);
+      const stream = await docker.pull(BEDROCK_IMAGE);
+      await new Promise((resolve, reject) => {
+        docker.modem.followProgress(stream, (err, output) => {
+          if (err) reject(err);
+          else resolve(output);
+        });
+      });
+      console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
+    }
+
+    // Build container config (matching original creation logic)
+    const containerConfig = {
+      Image: BEDROCK_IMAGE,
+      name: serverId,
+      User: '1000:1000',
+      Labels: {
+        'server-id': serverId,
+        'server-name': metadata.name || 'Bedrock Server'
+      },
+      Env: buildContainerEnv({ version: metadata.version, name: metadata.name }),
+      HostConfig: {
+        Binds: [`${hostServerPath}:/data`],
+        RestartPolicy: {
+          Name: 'unless-stopped'
+        },
+        Memory: metadata.memory || 2 * 1024 * 1024 * 1024
+      }
+    };
+
+    // Apply network and port configuration
+    const networkName = getNetworkName(metadata);
+    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName);
+
+    // Create and start container
+    const container = await docker.createContainer(containerConfig);
+    await container.start();
+
+    // Update metadata with actual container name
+    const containerInfo = await container.inspect();
+    const actualContainerName = containerInfo.Name ? containerInfo.Name.replace('/', '') : serverId;
+    if (await fs.pathExists(metadataPath)) {
+      const updatedMetadata = await fs.readJson(metadataPath);
+      updatedMetadata.containerName = actualContainerName;
+      updatedMetadata.updatedAt = new Date().toISOString();
+      await fs.writeJson(metadataPath, updatedMetadata, { spaces: 2 });
+    }
+
+    // Invalidate cache and broadcast update
+    invalidateServerCache(serverId);
+    setTimeout(() => broadcastServerUpdate(serverId), 2000);
+
+    const response = {
+      message: 'Server recreated successfully',
+      id: serverId,
+      name: metadata.name,
+      version: metadata.version,
+      note: 'Container has been recreated with stored configuration'
+    };
+    if (gamePort) response.gamePort = gamePort;
+
+    res.json(response);
+  } catch (err) {
+    console.error('Error recreating server:', err);
     res.status(500).json({ error: err.message });
   }
 });
