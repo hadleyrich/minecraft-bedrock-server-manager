@@ -198,7 +198,7 @@ async function getCachedServerInfo(serverId) {
   }
 
   // Get player count with timeout
-  const playerCount = info.State.Status === 'running' 
+  const playerCount = info.State.Status === 'running'
     ? await getPlayerCountFromContainer(container)
     : 0;
 
@@ -863,8 +863,8 @@ app.post('/api/servers', async (req, res) => {
         });
       });
       console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
-    } catch (pullErr) {
-      console.error('Failed to pull Docker image:', pullErr);
+    } catch (error_) {
+      console.error('Failed to pull Docker image:', error_);
       // Continue anyway, as the image might already exist or pull might fail but image is available
     }
 
@@ -1126,9 +1126,8 @@ app.post('/api/servers/:id/recreate', async (req, res) => {
 
     // Pull the Docker image if not available
     try {
-      console.log(`Pulling Docker image: ${BEDROCK_IMAGE}`);
       await docker.getImage(BEDROCK_IMAGE).inspect();
-    } catch (error_) {
+    } catch {
       console.warn(`Image not found locally, pulling ${BEDROCK_IMAGE}...`);
       const stream = await docker.pull(BEDROCK_IMAGE);
       await new Promise((resolve, reject) => {
@@ -2512,7 +2511,7 @@ function generatePackFolderName(addonName, suffix) {
     .replaceAll(/[^a-zA-Z0-9\s\-_]/g, '') // Remove special chars except space, dash, underscore
     .replaceAll(/\s+/g, '_') // Replace spaces with underscores
     .replaceAll(/_+/g, '_') // Replace multiple underscores with single
-    .replaceAll(/^(_+)|(_+)$/g, ''); // Trim underscores from start/end
+    .replaceAll(/^(_+)$|^$|(_+)$/g, ''); // Trim underscores from start/end
 
   // Ensure baseName is not empty
   if (!baseName) {
@@ -2732,7 +2731,7 @@ async function processMcAddon(filePath, originalName, paths, serverId, io) {
   let processedItems = 0;
 
   // Generate base name for this mcaddon file (without suffix)
-  const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)|(_+)$/g, '');
+  const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/(^_+|_+$)/g, '');
   const addonBaseName = baseName || 'unknown_addon';
 
   for (const item of extractedItems) {
@@ -2989,7 +2988,7 @@ async function toggleAddonPack(packPath, worldPath, configFileName) {
   const uuid = manifest.header.uuid;
   const version = manifest.header.version;
   const configFile = path.join(worldPath, configFileName);
-  
+
   let packs = [];
   if (await fs.pathExists(configFile)) {
     packs = await fs.readJson(configFile);
@@ -3028,16 +3027,16 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
     // Handle behavior pack if it exists
     const behaviorPackPath = path.join(paths.behaviorPacks, name);
     const behaviorResult = await toggleAddonPack(
-      behaviorPackPath, 
-      worldPath, 
+      behaviorPackPath,
+      worldPath,
       'world_behavior_packs.json'
     );
 
     // Handle resource pack if it exists
     const resourcePackPath = path.join(paths.resourcePacks, name);
     const resourceResult = await toggleAddonPack(
-      resourcePackPath, 
-      worldPath, 
+      resourcePackPath,
+      worldPath,
       'world_resource_packs.json'
     );
 
@@ -3377,7 +3376,7 @@ async function broadcastServerUpdate(serverId = null) {
 function extractPlayerNamesFromLogs(lines) {
   const players_temp = [];
   let lastIndex = -1;
-  
+
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].includes('players online:')) {
       lastIndex = i;
@@ -3396,7 +3395,7 @@ function extractPlayerNamesFromLogs(lines) {
       }
     }
   }
-  
+
   return players_temp;
 }
 
@@ -3404,7 +3403,7 @@ function extractPlayerNamesFromLogs(lines) {
 async function loadAndUpdatePlayerCache(serverId, players) {
   const cachePath = path.join(getServerPath(serverId), 'player_cache.json');
   let playerCache = {};
-  
+
   try {
     if (await fs.pathExists(cachePath)) {
       const cacheContent = await fs.readFile(cachePath, 'utf8');
@@ -3436,7 +3435,7 @@ async function loadAndUpdatePlayerCache(serverId, players) {
       player.xuid = playerCache[player.name];
     }
   });
-  
+
   return players;
 }
 
@@ -3457,7 +3456,7 @@ async function markOperators(serverId, players) {
   players.forEach(player => {
     player.isOperator = player.xuid && operatorXuids.has(player.xuid);
   });
-  
+
   return players;
 }
 
@@ -3523,12 +3522,12 @@ async function broadcastServerDetails(serverId) {
 
           const lines = demuxDockerStream(logs);
           let players_temp = extractPlayerNamesFromLogs(lines);
-          
+
           if (players_temp.length > 0) {
             players_temp = await loadAndUpdatePlayerCache(serverId, players_temp);
             players_temp = await markOperators(serverId, players_temp);
           }
-          
+
           players = players_temp;
         }
 
