@@ -2669,6 +2669,7 @@
                             (server) => `
                             <button
                                 onclick="selectServer('${server.id}')"
+                                oncontextmenu="showServerContextMenu(event, '${server.id}'); return false;"
                                 class="w-full text-left p-2 rounded-lg mb-1.5 transition text-sm ${
                                   state.selectedServer === server.id
                                     ? "bg-green-600 text-white"
@@ -2677,7 +2678,7 @@
                                 <div class="flex items-center justify-between">
                                     <div>
                                         <div class="font-medium truncate">${server.name}</div>
-                                        ${server.status === "running" ? `<div class="text-xs text-white-400">Port: ${server.ports?.find((p) => p.PrivatePort === 19132)?.PublicPort || "19132"}</div>` : ""}
+                                        ${server.status === "running" ? (server.containerIP ? `<div class="text-xs text-white-400">IP: ${server.containerIP}:19132</div>` : `<div class="text-xs text-white-400">Port: ${server.ports?.find((p) => p.PrivatePort === 19132)?.PublicPort || "19132"}</div>`) : ""}
                                     </div>
                                     <span class="status-dot ${server.status === "running" ? "bg-green-500" : "bg-red-500"}"></span>
                                 </div>

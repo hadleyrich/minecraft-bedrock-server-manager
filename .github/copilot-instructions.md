@@ -47,10 +47,10 @@ This is a full-stack web application for managing multiple Minecraft Bedrock Edi
 
 ### General Guidelines
 
-1. **File Organization**: Monolithic structure - main logic in `server.js` and `public/index.html`
+1. **File Organization**: Monolithic structure - main logic in `server.js` and `src/index.html`
 2. **Error Handling**: Use try-catch blocks consistently; return JSON error responses
 3. **Async/Await**: Prefer async/await over promises/callbacks
-4. **Comments**: Add explanatory comments for complex logic, especially Docker operations
+4. **Comments**: Add explanatory comments for complex logic
 
 ### Backend Patterns
 
@@ -116,7 +116,7 @@ socket.on("update-event", (data) => {
 ### Docker Container Management
 
 - **Image**: `itzg/minecraft-bedrock-server:latest`
-- **Network**: Bridge mode
+- **Network**: Bridge or macvlan/ipvlan mode
 - **Volumes**: Bind mount from DATA_DIR (default: `/opt/minecraft-servers/{serverId}`)
 - **Port Allocation**: Dynamic assignment, tracked in metadata.json
 - **Environment Variables**: Set via Docker API (EULA, VERSION, SERVER_NAME, etc.)
@@ -221,27 +221,6 @@ npm start                # Start the application
 npm run setup            # Installs socket.io and downloads client library
 ```
 
-## Testing Guidelines
-
-### Manual Testing Checklist
-
-- [ ] Create/import/delete server
-- [ ] Start/stop/restart containers
-- [ ] Upload files and edit configurations
-- [ ] Install/enable/disable addons
-- [ ] Execute console commands
-- [ ] Create/restore backups
-- [ ] Test in multiple browser tabs (WebSocket sync)
-- [ ] Test WebSocket fallback (block WebSocket in browser DevTools)
-- [ ] Test mobile responsive layout
-
-### Docker Testing
-
-- Verify container starts with correct env vars
-- Check port bindings and networking
-- Ensure volumes are mounted correctly
-- Test container logs streaming
-
 ## Performance Considerations
 
 1. **Caching**: Use existing cache mechanisms (`serverCache`, `fileCache`) for frequently accessed data
@@ -293,11 +272,12 @@ When working on this repository:
 ## Key Files Reference
 
 - **server.js** (3090 lines): All backend logic, API routes, Docker management
-- **public/index.html** (3218 lines): Entire frontend SPA
-- **public/styles.css**: Tailwind input file (builds to output.css)
+- **src/index.html** (3218 lines): Entire frontend SPA
+- **src/styles.css**: Tailwind input file (builds to output.css)
 - **package.json**: Dependencies and npm scripts
 - **Dockerfile**: Container definition for the manager itself
 - **.env**: Environment configuration (not in repo, see env.txt)
+- **public/**: Build generated assets - DO NOT EDIT
 
 ## Related Documentation
 
