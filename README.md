@@ -223,11 +223,13 @@ You can customize the deployment by editing the following environment variables:
 
 - `LOGIN_PASSWORD`: Set your desired password
 - `PORT`: Change the port if needed (default: 3001)
-- `MAX_LOGIN_ATTEMPTS`: Maximum failed login attempt
-- `LOGIN_LOCKOUT_MINUTES`: duration of lockout in case or reaching MAX_LOGIN_ATTEMPTS
+- `MAX_LOGIN_ATTEMPTS`: Maximum failed login attempts (default: 5)
+- `LOGIN_LOCKOUT_MINUTES`: Duration of lockout after reaching MAX_LOGIN_ATTEMPTS (default: 5)
 - `DOCKER_HOST`: Set to `tcp://docker-proxy:2375` if your system restricts direct mounting of the Docker socket
 - `DOCKER_NETWORK`: Specify a Docker network for server containers (optional)
 - `ENABLE_SSH`: Set to `true` to enable SSH access to Minecraft server containers (optional)
+- `BEDROCK_IMAGE`: Docker image to use for Minecraft servers (default: `itzg/minecraft-bedrock-server`)
+- `ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins (default: `http://localhost:3001,http://127.0.0.1:3001`)
 
 #### Volumes
 
@@ -264,9 +266,16 @@ PORT=3001
 DATA_DIR=/opt/minecraft-servers #change this to your data directory
 
 # Docker Configuration (Optional)
+# Docker image to use (optional, defaults to itzg/minecraft-bedrock-server)
+#BEDROCK_IMAGE=itzg/minecraft-bedrock-server
+
 # Specify a Docker network for containers to use
 # Leave commented to use Docker's default bridge network
 #DOCKER_NETWORK=minecraft-network
+
+# CORS Configuration (optional)
+# Comma-separated list of allowed origins, defaults to localhost
+#ALLOWED_ORIGINS=http://localhost:3001,http://192.168.1.100:3001
 
 # Authentication
 LOGIN_PASSWORD=your_secure_password_here
@@ -285,7 +294,7 @@ sudo chown $USER:$USER /opt/minecraft-servers #change this to your data director
 #### 4. **Start the Application**
 
 ```bash
-# Start the app (run on PM2)
+# Start the application
 npm start
 ```
 
