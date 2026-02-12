@@ -387,7 +387,9 @@ function buildContainerEnv(metadata, overrides = {}) {
   const env = [
     'EULA=TRUE',
     'VERSION=' + (overrides.version || metadata.version || 'LATEST'),
-    'SERVER_NAME=' + (overrides.name || metadata.name || 'Bedrock Server')
+    'SERVER_NAME=' + (overrides.name || metadata.name || 'Bedrock Server'),
+    'UID=1000',
+    'GID=1000'
   ];
 
   if (ENABLE_SSH) {

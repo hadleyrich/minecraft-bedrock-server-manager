@@ -50,7 +50,9 @@ function buildContainerEnv(metadata) {
     const env = [
         'EULA=TRUE',
         'VERSION=' + (metadata.version || 'LATEST'),
-        'SERVER_NAME=' + (metadata.name || 'Bedrock Server')
+        'SERVER_NAME=' + (metadata.name || 'Bedrock Server'),
+        'UID=1000',
+        'GID=1000'
     ];
 
     if (ENABLE_SSH) {
