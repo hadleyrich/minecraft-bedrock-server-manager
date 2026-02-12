@@ -8,7 +8,6 @@ const fs = require('fs-extra');
 const path = require('path');
 const archiver = require('archiver');
 const AdmZip = require('adm-zip');
-const fsPromises = require('fs').promises;
 const multer = require('multer');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
@@ -84,7 +83,9 @@ async function getCachedServerInfo(serverId) {
   try {
     const metadataPath = path.join(serverPath, 'metadata.json');
     metadata = await readCachedFile(metadataPath, 'json');
-  } catch (err) { }
+  } catch (err) {
+    console.error(`Failed to read metadata for ${serverId}:`, err.message);
+  }
 
   // Get world size
   let worldSize = '0 MB';
@@ -94,7 +95,9 @@ async function getCachedServerInfo(serverId) {
       const size = await getDirectorySize(worldPath);
       worldSize = formatBytes(size);
     }
-  } catch (err) { }
+  } catch (err) {
+    console.error(`Failed to get world size for ${serverId}:`, err.message);
+  }
 
   // Get player count with timeout
   let playerCount = 0;
@@ -152,7 +155,9 @@ async function getCachedServerInfo(serverId) {
     if (maxPlayersMatch) {
       maxPlayers = parseInt(maxPlayersMatch[1]);
     }
-  } catch (err) { }
+  } catch (err) {
+    console.error(`Failed to read max players for ${serverId}:`, err.message);
+  }
 
   // Convert ports to array format matching listContainers
   const ports = [];
@@ -244,12 +249,52 @@ async function fetchXuidsBatch(players, concurrency = 3) {
   return results;
 }
 
+// Input validation helpers
+function validateServerId(id) {
+  // Server IDs should be alphanumeric with hyphens/underscores, between 1-64 chars
+  return typeof id === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(id);
+}
+
+function validateServerName(name) {
+  // Server names should be reasonable length and not contain special chars
+  return typeof name === 'string' && name.length >= 1 && name.length <= 100 && !/[<>:"|?*]/.test(name);
+}
+
+function validateMemory(memory) {
+  // Memory should be a positive number in bytes, reasonable limits (256MB to 32GB)
+  const min = 256 * 1024 * 1024; // 256MB
+  const max = 32 * 1024 * 1024 * 1024; // 32GB
+  const memNum = parseInt(memory);
+  return !isNaN(memNum) && memNum >= min && memNum <= max;
+}
+
+function validatePort(port) {
+  const portNum = parseInt(port);
+  return !isNaN(portNum) && portNum >= 1024 && portNum <= 65535;
+}
+
 const app = express();
 const server = createServer(app);
+
+// CORS configuration - restrict to same origin or localhost for security
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',') 
+  : ['http://localhost:3001', 'http://127.0.0.1:3001'];
+
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl)
+      if (!origin) return callback(null, true);
+      // Allow configured origins
+      if (ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes('*')) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: ["GET", "POST"],
+    credentials: true
   },
   transports: ['websocket', 'polling'],
   allowEIO3: true, // Support older Socket.IO clients
@@ -292,17 +337,23 @@ if (process.env.DOCKER_HOST) {
 const docker = new Docker(dockerConfig);
 
 app.use(cors({
-  origin: true,
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    // Allow configured origins
+    if (ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes('*')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // Handle preflight OPTIONS requests
-app.options('*', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+app.options('*', cors());
   res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
   res.status(200).end();
 });
@@ -631,6 +682,12 @@ app.post('/api/servers/import', async (req, res) => {
 app.post('/api/servers', async (req, res) => {
   try {
     const { name, version = 'LATEST', network } = req.body;
+    
+    // Validate inputs
+    if (!validateServerName(name)) {
+      return res.status(400).json({ error: 'Invalid server name. Must be 1-100 characters and not contain special characters.' });
+    }
+
     const serverId = `bedrock-${Date.now()}`;
     const serverPath = getServerPath(serverId);
     const hostDataPath = await getHostDataPath();
@@ -1551,7 +1608,7 @@ app.get('/api/servers/:id/files', async (req, res) => {
   try {
     const serverPath = getServerPath(req.params.id);
     const requestedPath = req.query.path || '/';
-    const fullPath = path.join(serverPath, requestedPath);
+    const fullPath = path.normalize(path.join(serverPath, requestedPath));
 
     // Security: prevent path traversal
     if (!fullPath.startsWith(serverPath)) {
@@ -1585,7 +1642,7 @@ app.get('/api/servers/:id/files', async (req, res) => {
 app.get('/api/servers/:id/files/download', async (req, res) => {
   try {
     const serverPath = getServerPath(req.params.id);
-    const filePath = path.join(serverPath, req.query.path);
+    const filePath = path.normalize(path.join(serverPath, req.query.path));
 
     if (!filePath.startsWith(serverPath)) {
       return res.status(403).json({ error: 'Access denied' });
@@ -1605,7 +1662,7 @@ app.get('/api/servers/:id/files/download', async (req, res) => {
 app.delete('/api/servers/:id/files', async (req, res) => {
   try {
     const serverPath = getServerPath(req.params.id);
-    const filePath = path.join(serverPath, req.query.path);
+    const filePath = path.normalize(path.join(serverPath, req.query.path));
 
     if (!filePath.startsWith(serverPath)) {
       return res.status(403).json({ error: 'Access denied' });
@@ -1624,7 +1681,7 @@ const upload = multer({ dest: './temp/uploads/' });
 app.post('/api/servers/:id/files/upload', upload.array('files'), async (req, res) => {
   try {
     const serverPath = getServerPath(req.params.id);
-    const targetPath = path.join(serverPath, req.query.path || '/');
+    const targetPath = path.normalize(path.join(serverPath, req.query.path || '/'));
 
     if (!targetPath.startsWith(serverPath)) {
       return res.status(403).json({ error: 'Access denied' });
@@ -1633,7 +1690,9 @@ app.post('/api/servers/:id/files/upload', upload.array('files'), async (req, res
     await fs.ensureDir(targetPath);
 
     for (const file of req.files) {
-      const destPath = path.join(targetPath, file.originalname);
+      // Sanitize filename to prevent path traversal
+      const sanitizedName = path.basename(file.originalname);
+      const destPath = path.join(targetPath, sanitizedName);
       await fs.move(file.path, destPath, { overwrite: true });
     }
 
@@ -1648,8 +1707,10 @@ app.post('/api/servers/:id/files/rename', async (req, res) => {
   try {
     const { oldPath, newName } = req.body;
     const serverPath = getServerPath(req.params.id);
-    const oldFullPath = path.join(serverPath, oldPath);
-    const newFullPath = path.join(path.dirname(oldFullPath), newName);
+    const oldFullPath = path.normalize(path.join(serverPath, oldPath));
+    // Sanitize newName to prevent path traversal
+    const sanitizedNewName = path.basename(newName);
+    const newFullPath = path.join(path.dirname(oldFullPath), sanitizedNewName);
 
     if (!oldFullPath.startsWith(serverPath) || !newFullPath.startsWith(serverPath)) {
       return res.status(403).json({ error: 'Access denied' });
@@ -1666,7 +1727,7 @@ app.post('/api/servers/:id/files/rename', async (req, res) => {
 app.get('/api/servers/:id/files/content', async (req, res) => {
   try {
     const serverPath = getServerPath(req.params.id);
-    const filePath = path.join(serverPath, req.query.path);
+    const filePath = path.normalize(path.join(serverPath, req.query.path));
 
     if (!filePath.startsWith(serverPath)) {
       return res.status(403).json({ error: 'Access denied' });
@@ -1702,7 +1763,9 @@ app.post('/api/servers/:id/files/folder', async (req, res) => {
   try {
     const { path: folderPath, name } = req.body;
     const serverPath = getServerPath(req.params.id);
-    const fullPath = path.join(serverPath, folderPath, name);
+    // Sanitize folder name to prevent path traversal
+    const sanitizedName = path.basename(name);
+    const fullPath = path.normalize(path.join(serverPath, folderPath, sanitizedName));
 
     if (!fullPath.startsWith(serverPath)) {
       return res.status(403).json({ error: 'Access denied' });
@@ -1784,8 +1847,15 @@ app.post('/api/servers/:id/zip', express.json(), async (req, res) => {
   try {
     const { sourcePath, zipName } = req.body;
     const serverPath = getServerPath(req.params.id);
-    const fullSourcePath = path.join(serverPath, sourcePath);
-    const zipPath = path.join(serverPath, zipName);
+    const fullSourcePath = path.normalize(path.join(serverPath, sourcePath));
+    // Sanitize zip name to prevent path traversal
+    const sanitizedZipName = path.basename(zipName);
+    const zipPath = path.join(serverPath, sanitizedZipName);
+
+    // Security: prevent path traversal
+    if (!fullSourcePath.startsWith(serverPath) || !zipPath.startsWith(serverPath)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
     // Check if source exists
     if (!(await fs.pathExists(fullSourcePath))) {
@@ -1835,8 +1905,13 @@ app.post('/api/servers/:id/unzip', express.json(), async (req, res) => {
   try {
     const { zipPath, extractPath } = req.body;
     const serverPath = getServerPath(req.params.id);
-    const fullZipPath = path.join(serverPath, zipPath);
-    const fullExtractPath = path.join(serverPath, extractPath || '');
+    const fullZipPath = path.normalize(path.join(serverPath, zipPath));
+    const fullExtractPath = path.normalize(path.join(serverPath, extractPath || ''));
+
+    // Security: prevent path traversal
+    if (!fullZipPath.startsWith(serverPath) || !fullExtractPath.startsWith(serverPath)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
 
     // Check if zip file exists
     if (!(await fs.pathExists(fullZipPath))) {
@@ -3069,7 +3144,9 @@ async function broadcastServerDetails(serverId) {
               const cacheContent = await fs.readFile(cachePath, 'utf8');
               playerCache = JSON.parse(cacheContent);
             }
-          } catch (err) { }
+          } catch (err) {
+            console.error(`Failed to read player cache:`, err.message);
+          }
 
           const uncachedPlayers = players_temp.filter(p => !playerCache[p.name]);
 
@@ -3082,7 +3159,9 @@ async function broadcastServerDetails(serverId) {
 
             try {
               await fs.writeJson(cachePath, playerCache, { spaces: 2 });
-            } catch (err) { }
+            } catch (err) {
+              console.error(`Failed to write player cache:`, err.message);
+            }
           }
 
           players_temp.forEach(player => {
@@ -3098,7 +3177,9 @@ async function broadcastServerDetails(serverId) {
               const permissionsContent = await fs.readFile(permissionsPath, 'utf8');
               permissions = JSON.parse(permissionsContent);
             }
-          } catch (err) { }
+          } catch (err) {
+            console.error(`Failed to read permissions:`, err.message);
+          }
 
           const operatorXuids = permissions.filter(p => p.permission === 'operator').map(p => p.xuid);
           players_temp.forEach(player => {
@@ -3123,7 +3204,9 @@ async function broadcastServerDetails(serverId) {
               }
             });
           }
-        } catch (err) { }
+        } catch (err) {
+          console.error(`Failed to read server config:`, err.message);
+        }
 
         io.emit('server-details-update', {
           serverId,
