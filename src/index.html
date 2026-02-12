@@ -176,7 +176,7 @@
             type="password"
             id="passwordInput"
             placeholder="Enter password"
-            class="w-full px-3 py-2 text-sm bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+            class="w-full px-3 py-2 text-sm bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500"
             onkeypress="if (event.key === 'Enter') checkLogin();"
           />
         </div>
@@ -1230,7 +1230,7 @@
                     <div class="text-left">
                         <div class="mb-4">
                             <label class="block text-sm font-medium text-gray-300 mb-2">Server Name</label>
-                            <input id="swal-server-name" type="text" placeholder="My Minecraft Server" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-white">
+                            <input id="swal-server-name" type="text" placeholder="My Minecraft Server" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500 text-white">
                         </div>
                         <div class="mb-4">
                             <label class="block text-sm font-medium text-gray-300 mb-2">Minecraft Version</label>
@@ -1252,13 +1252,13 @@
                                         <input type="radio" name="version-type" value="CUSTOM" class="mr-2">
                                         <span class="text-sm">Custom version:</span>
                                     </label>
-                                    <input id="swal-custom-version" type="text" placeholder="e.g. 1.20.80" class="flex-1 px-3 py-1 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-white text-sm" disabled>
+                                    <input id="swal-custom-version" type="text" placeholder="e.g. 1.20.80" class="flex-1 px-3 py-1 bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500 text-white text-sm" disabled>
                                 </div>
                             </div>
                         </div>
                         <div class="mb-4">
                             <label class="block text-sm font-medium text-gray-300 mb-2">Docker Network (Optional)</label>
-                            <input id="swal-docker-network" type="text" placeholder="e.g. minecraft-network" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-white text-sm">
+                            <input id="swal-docker-network" type="text" placeholder="e.g. minecraft-network" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500 text-white text-sm">
                             <p class="text-xs text-gray-400 mt-1">Leave empty to use default Docker network</p>
                         </div>
                     </div>
@@ -1371,7 +1371,7 @@
                                         <input type="radio" name="edit-version-type" value="CUSTOM" ${isCustom ? "checked" : ""} class="mr-2">
                                         <span class="text-sm">Custom version:</span>
                                     </label>
-                                    <input id="swal-edit-custom-version" type="text" value="${isCustom ? currentVersion : ""}" placeholder="e.g. 1.20.80" class="flex-1 px-3 py-1 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-white text-sm" ${isCustom ? "" : "disabled"}>
+                                    <input id="swal-edit-custom-version" type="text" value="${isCustom ? currentVersion : ""}" placeholder="e.g. 1.20.80" class="flex-1 px-3 py-1 bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500 text-white text-sm" ${isCustom ? "" : "disabled"}>
                                 </div>
                             </div>
                             <div class="text-xs text-yellow-400 mt-2">
@@ -1541,7 +1541,7 @@
                                         <input type="radio" name="memory-preset" value="custom" ${isCustomMemory ? "checked" : ""} class="mr-2">
                                         <span class="text-sm">Custom:</span>
                                     </label>
-                                    <input id="swal-custom-memory" type="number" min="256" max="32768" value="${isCustomMemory ? currentMemoryMB : ""}" placeholder="e.g. 3072" class="flex-1 px-3 py-1 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 text-white text-sm" ${isCustomMemory ? "" : "disabled"}>
+                                    <input id="swal-custom-memory" type="number" min="256" max="32768" value="${isCustomMemory ? currentMemoryMB : ""}" placeholder="e.g. 3072" class="flex-1 px-3 py-1 bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500 text-white text-sm" ${isCustomMemory ? "" : "disabled"}>
                                 </div>
                             </div>
                             <div class="text-xs text-yellow-400 mt-2">
@@ -2787,8 +2787,8 @@
                                         <div class="flex items-center gap-2 mb-1">
                                             <h2 class="text-base md:text-lg font-bold truncate">${currentServer.name}</h2>
                                             <span class="px-2 py-0.5 text-xs bg-blue-600 rounded-lg">v${currentServer.version || "LATEST"}</span>
-                                            <button onclick="editServerVersion()" class="px-2 py-0.5 text-xs bg-gray-600 hover:bg-gray-500 rounded" title="Edit Version">✏️</button>
-                                            <button onclick="editServerMemory()" class="px-2 py-0.5 text-xs bg-purple-600 hover:bg-purple-500 rounded" title="Edit Memory">🧠</button>
+                                            <button onclick="editServerVersion()" class="px-2 py-0.5 text-xs bg-gray-600 hover:bg-gray-500 rounded-sm" title="Edit Version">✏️</button>
+                                            <button onclick="editServerMemory()" class="px-2 py-0.5 text-xs bg-purple-600 hover:bg-purple-500 rounded-sm" title="Edit Memory">🧠</button>
                                         </div>
                                         <div class="text-xs text-gray-400 mt-0.5 truncate">
                                             ${currentServer.status} • ${currentServer.worldSize}
@@ -2874,7 +2874,7 @@
         ];
 
         if (booleanFields.includes(key)) {
-          return `<select onchange="state.config['${key}'] = this.value" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-green-500">
+          return `<select onchange="state.config['${key}'] = this.value" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-hidden focus:border-green-500">
                     <option value="true" ${value === "true" ? "selected" : ""}>true</option>
                     <option value="false" ${value === "false" ? "selected" : ""}>false</option>
                 </select>`;
@@ -2894,7 +2894,7 @@
         };
 
         if (enumFields[key]) {
-          return `<select onchange="state.config['${key}'] = this.value" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-green-500">
+          return `<select onchange="state.config['${key}'] = this.value" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-hidden focus:border-green-500">
                     ${enumFields[key].map((opt) => `<option value="${opt}" ${value === opt ? "selected" : ""}>${opt}</option>`).join("")}
                 </select>`;
         }
@@ -2917,29 +2917,29 @@
 
         if (numberFields[key]) {
           const attrs = numberFields[key];
-          return `<input type="number" value="${value}" onchange="state.config['${key}'] = this.value" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-green-500" ${attrs.min !== undefined ? `min="${attrs.min}"` : ""} ${attrs.max !== undefined ? `max="${attrs.max}"` : ""} ${attrs.step !== undefined ? `step="${attrs.step}"` : ""}>`;
+          return `<input type="number" value="${value}" onchange="state.config['${key}'] = this.value" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-hidden focus:border-green-500" ${attrs.min !== undefined ? `min="${attrs.min}"` : ""} ${attrs.max !== undefined ? `max="${attrs.max}"` : ""} ${attrs.step !== undefined ? `step="${attrs.step}"` : ""}>`;
         }
 
         // Special for server-build-radius-ratio
         if (key === "server-build-radius-ratio") {
           if (value === "Disabled") {
-            return `<select onchange="if(this.value === 'Disabled'){state.config['${key}'] = 'Disabled';} else {state.config['${key}'] = '0.5'; render();}" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-green-500">
+            return `<select onchange="if(this.value === 'Disabled'){state.config['${key}'] = 'Disabled';} else {state.config['${key}'] = '0.5'; render();}" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-hidden focus:border-green-500">
                         <option value="Disabled" selected>Disabled</option>
                         <option value="custom">Custom (0.0 - 1.0)</option>
                     </select>`;
           } else {
             return `<div class="flex gap-2">
-                        <select onchange="if(this.value==='Disabled'){state.config['${key}']='Disabled'; render();}else{this.nextElementSibling.focus();}" class="px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-green-500">
+                        <select onchange="if(this.value==='Disabled'){state.config['${key}']='Disabled'; render();}else{this.nextElementSibling.focus();}" class="px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-hidden focus:border-green-500">
                             <option value="custom" selected>Custom</option>
                             <option value="Disabled">Disabled</option>
                         </select>
-                        <input type="number" min="0" max="1" step="0.1" value="${value}" onchange="state.config['${key}'] = this.value" class="flex-1 px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-green-500">
+                        <input type="number" min="0" max="1" step="0.1" value="${value}" onchange="state.config['${key}'] = this.value" class="flex-1 px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-hidden focus:border-green-500">
                     </div>`;
           }
         }
 
         // Default to text input
-        return `<input type="text" value="${value}" onchange="state.config['${key}'] = this.value" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-green-500">`;
+        return `<input type="text" value="${value}" onchange="state.config['${key}'] = this.value" class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-hidden focus:border-green-500">`;
       }
 
       function renderTabContent(server) {
@@ -3015,7 +3015,7 @@
                                                     <div>
                                                         <div class="font-medium text-sm flex items-center gap-2">
                                                             ${player.name}
-                                                            ${player.isOperator ? '<span class="px-2 py-0.5 text-xs bg-yellow-600 rounded">OP</span>' : ""}
+                                                            ${player.isOperator ? '<span class="px-2 py-0.5 text-xs bg-yellow-600 rounded-sm">OP</span>' : ""}
                                                         </div>
                                                         <div class="text-xs text-gray-400">Connected</div>
                                                     </div>
@@ -3071,7 +3071,7 @@
                                     oninput="state.consoleCommand = this.value"
                                     onkeypress="if(event.key==='Enter') executeCommand()"
                                     placeholder="Enter command..."
-                                    class="flex-1 px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-none focus:border-green-500">
+                                    class="flex-1 px-3 py-2 text-sm bg-gray-900 border border-gray-700 rounded-lg focus:outline-hidden focus:border-green-500">
                                 <button onclick="executeCommand()" class="px-4 py-2 text-sm bg-green-600 hover:bg-green-700 rounded-lg">
                                     ▶️ Run
                                 </button>
@@ -3106,7 +3106,7 @@
                                                 <div>
                                                     <div class="font-medium text-sm flex items-center gap-2">
                                                         ${player.name}
-                                                        ${player.isOperator ? '<span class="px-2 py-0.5 text-xs bg-yellow-600 rounded">OP</span>' : ""}
+                                                        ${player.isOperator ? '<span class="px-2 py-0.5 text-xs bg-yellow-600 rounded-sm">OP</span>' : ""}
                                                     </div>
                                                     <div class="text-xs text-gray-400">Connected</div>
                                                 </div>
@@ -3164,7 +3164,7 @@
                                     ${
                                       state.currentPath !== "/"
                                         ? `
-                                        <button onclick="goUpDirectory()" class="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">
+                                        <button onclick="goUpDirectory()" class="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded-sm">
                                             ⬆️ Up
                                         </button>
                                     `
@@ -3208,7 +3208,7 @@
                                             ${
                                               file.type === "directory"
                                                 ? `
-                                                <button onclick="navigateFolder('${file.path}'); event.stopPropagation();" class="px-1.5 py-1 text-sm hover:bg-gray-600 rounded" title="Open">📂</button>
+                                                <button onclick="navigateFolder('${file.path}'); event.stopPropagation();" class="px-1.5 py-1 text-sm hover:bg-gray-600 rounded-sm" title="Open">📂</button>
                                             `
                                                 : ""
                                             }
@@ -3301,15 +3301,15 @@
                                                   hasResource
                                                 ) {
                                                   typeTags.push(
-                                                    '<span class="px-2 py-0.5 text-xs bg-purple-600 rounded">BP + RP</span>',
+                                                    '<span class="px-2 py-0.5 text-xs bg-purple-600 rounded-sm">BP + RP</span>',
                                                   );
                                                 } else if (hasBehavior) {
                                                   typeTags.push(
-                                                    '<span class="px-2 py-0.5 text-xs bg-blue-600 rounded">BP</span>',
+                                                    '<span class="px-2 py-0.5 text-xs bg-blue-600 rounded-sm">BP</span>',
                                                   );
                                                 } else if (hasResource) {
                                                   typeTags.push(
-                                                    '<span class="px-2 py-0.5 text-xs bg-green-600 rounded">RP</span>',
+                                                    '<span class="px-2 py-0.5 text-xs bg-green-600 rounded-sm">RP</span>',
                                                   );
                                                 }
 
@@ -3322,7 +3322,7 @@
                                                                 <span class="font-medium text-sm">${addon.name}</span>
                                                                 <div class="flex flex-wrap gap-1">
                                                                     ${typeTags.join("")}
-                                                                    ${isEnabled ? '<span class="px-2 py-0.5 text-xs bg-green-600 rounded">✓ Enabled</span>' : '<span class="px-2 py-0.5 text-xs bg-gray-600 rounded">Disabled</span>'}
+                                                                    ${isEnabled ? '<span class="px-2 py-0.5 text-xs bg-green-600 rounded-sm">✓ Enabled</span>' : '<span class="px-2 py-0.5 text-xs bg-gray-600 rounded-sm">Disabled</span>'}
                                                                 </div>
                                                             </div>
                                                             <div class="text-xs text-gray-500">
@@ -3385,7 +3385,7 @@
                                                             <div class="flex items-center gap-2 mb-1">
                                                                 <span class="font-medium text-sm truncate">${addon.name}</span>
                                                                 ${typeTags.join("")}
-                                                                ${isEnabled ? '<span class="px-2 py-0.5 text-xs bg-green-600 rounded">✓ Enabled</span>' : '<span class="px-2 py-0.5 text-xs bg-gray-600 rounded">Disabled</span>'}
+                                                                ${isEnabled ? '<span class="px-2 py-0.5 text-xs bg-green-600 rounded-sm">✓ Enabled</span>' : '<span class="px-2 py-0.5 text-xs bg-gray-600 rounded-sm">Disabled</span>'}
                                                             </div>
                                                             <div class="text-xs text-gray-500">
                                                                 ${addon.behaviorPack?.version ? `BP v${addon.behaviorPack.version.join(".")} • ` : ""}
@@ -3470,7 +3470,7 @@
                                                     <div class="flex-1 min-w-0">
                                                         <div class="flex items-center gap-2 mb-1">
                                                             <span class="font-medium text-sm">${world.name}</span>
-                                                            ${world.name === state.config["level-name"] ? '<span class="px-2 py-0.5 text-xs bg-blue-600 rounded">Active</span>' : ""}
+                                                            ${world.name === state.config["level-name"] ? '<span class="px-2 py-0.5 text-xs bg-blue-600 rounded-sm">Active</span>' : ""}
                                                             ${world.isValid ? '<span class="text-xs text-green-500">✓ Valid</span>' : '<span class="text-xs text-red-500">⚠ Invalid</span>'}
                                                         </div>
                                                         <div class="text-xs text-gray-500">
@@ -3508,7 +3508,7 @@
                                                     <div class="flex-1 min-w-0">
                                                         <div class="flex items-center gap-2 mb-1">
                                                             <span class="font-medium text-sm truncate">${world.name}</span>
-                                                            ${world.name === state.config["level-name"] ? '<span class="px-2 py-0.5 text-xs bg-blue-600 rounded">Active</span>' : ""}
+                                                            ${world.name === state.config["level-name"] ? '<span class="px-2 py-0.5 text-xs bg-blue-600 rounded-sm">Active</span>' : ""}
                                                             ${world.isValid ? '<span class="text-xs text-green-500">✓ Valid</span>' : '<span class="text-xs text-red-500">⚠ Invalid</span>'}
                                                         </div>
                                                         <div class="text-xs text-gray-500">
@@ -3568,8 +3568,8 @@
                                     <div>
                                         <strong class="text-gray-300">4. Join Server:</strong> When connecting, you'll be prompted to "Download & Join" for resource packs. Behavior packs work automatically.
                                     </div>
-                                    <div class="mt-2 p-2 bg-blue-900/30 rounded">
-                                        <strong class="text-blue-400">💡 Tip:</strong> To force resource packs on all clients, set <code class="bg-gray-900 px-1 rounded">texturepack-required=true</code> in the Config tab.
+                                    <div class="mt-2 p-2 bg-blue-900/30 rounded-sm">
+                                        <strong class="text-blue-400">💡 Tip:</strong> To force resource packs on all clients, set <code class="bg-gray-900 px-1 rounded-sm">texturepack-required=true</code> in the Config tab.
                                     </div>
                                 </div>
                             </div>

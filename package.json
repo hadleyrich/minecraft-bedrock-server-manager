@@ -6,26 +6,25 @@
   "scripts": {
     "start": "npm run build:assets && node server.js",
     "dev": "nodemon server.js",
-    "build:css": "tailwindcss -i ./src/styles.css -o ./public/output.css --watch",
-    "build:css:prod": "tailwindcss -i ./src/styles.css -o ./public/output.css --minify",
+    "build:css": "npx @tailwindcss/cli -i ./src/styles.css -o ./public/output.css --watch",
+    "build:css:prod": "npx @tailwindcss/cli -i ./src/styles.css -o ./public/output.css --minify",
     "build:assets": "npm run build:css:prod && npm run copy-assets",
     "copy-assets": "node scripts/copy-assets.js"
   },
   "dependencies": {
+    "@tailwindcss/cli": "^4.1.18",
     "adm-zip": "^0.5.10",
     "archiver": "^7.0.1",
-    "autoprefixer": "^10.4.0",
     "cors": "^2.8.5",
     "dockerode": "^4.0.0",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "fs-extra": "^11.1.1",
     "multer": "^2.0.2",
-    "postcss": "^8.4.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "sweetalert2": "^11.10.1",
-    "tailwindcss": "^3.4.0"
+    "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
