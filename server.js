@@ -95,6 +95,71 @@ function invalidateFileCache(filePath) {
   }
 }
 
+// Helper: Get player count from running container
+async function getPlayerCountFromContainer(container) {
+  try {
+    const playerPromise = (async () => {
+      const exec = await container.exec({
+        Cmd: ['send-command', 'list'],
+        AttachStdout: true,
+        AttachStderr: true
+      });
+      await exec.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const logs = await container.logs({
+        stdout: true,
+        stderr: true,
+        tail: 20
+      });
+      const lines = demuxDockerStream(logs);
+      let lastIndex = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes('players online:')) {
+          lastIndex = i;
+        }
+      }
+      let playerCount = 0;
+      if (lastIndex >= 0) {
+        for (let i = lastIndex + 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
+            break;
+          }
+          if (line) playerCount++;
+        }
+      }
+      return playerCount;
+    })();
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Player count timeout')), 5000)
+    );
+
+    return await Promise.race([playerPromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('Error getting player count:', err.message);
+    return 0;
+  }
+}
+
+// Helper: Convert Docker network ports to array format
+function convertPortsToArray(networkPorts) {
+  const ports = [];
+  for (const [key, bindings] of Object.entries(networkPorts || {})) {
+    if (bindings && bindings.length > 0) {
+      for (const binding of bindings) {
+        ports.push({
+          IP: binding.HostIp || '0.0.0.0',
+          PrivatePort: Number.parseInt(key.split('/')[0]),
+          PublicPort: Number.parseInt(binding.HostPort),
+          Type: key.split('/')[1]
+        });
+      }
+    }
+  }
+  return ports;
+}
+
 // Cached server info
 async function getCachedServerInfo(serverId) {
   const cacheKey = `server:${serverId}`;
@@ -133,51 +198,9 @@ async function getCachedServerInfo(serverId) {
   }
 
   // Get player count with timeout
-  let playerCount = 0;
-  if (info.State.Status === 'running') {
-    try {
-      const playerPromise = (async () => {
-        const exec = await container.exec({
-          Cmd: ['send-command', 'list'],
-          AttachStdout: true,
-          AttachStderr: true
-        });
-        await exec.start();
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const logs = await container.logs({
-          stdout: true,
-          stderr: true,
-          tail: 20
-        });
-        const lines = demuxDockerStream(logs);
-        let lastIndex = -1;
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].includes('players online:')) {
-            lastIndex = i;
-          }
-        }
-        if (lastIndex >= 0) {
-          for (let i = lastIndex + 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
-              break;
-            }
-            if (line) playerCount++;
-          }
-        }
-        return playerCount;
-      })();
-
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Player count timeout')), 5000)
-      );
-
-      playerCount = await Promise.race([playerPromise, timeoutPromise]);
-    } catch (err) {
-      console.warn('Error getting player count:', err.message);
-      playerCount = 0;
-    }
-  }
+  const playerCount = info.State.Status === 'running' 
+    ? await getPlayerCountFromContainer(container)
+    : 0;
 
   // Get max players from config
   let maxPlayers = 10;
@@ -197,20 +220,7 @@ async function getCachedServerInfo(serverId) {
   }
 
   // Convert ports to array format matching listContainers
-  const ports = [];
-  const networkPorts = info.NetworkSettings.Ports || {};
-  for (const [key, bindings] of Object.entries(networkPorts)) {
-    if (bindings && bindings.length > 0) {
-      for (const binding of bindings) {
-        ports.push({
-          IP: binding.HostIp || '0.0.0.0',
-          PrivatePort: Number.parseInt(key.split('/')[0]),
-          PublicPort: Number.parseInt(binding.HostPort),
-          Type: key.split('/')[1]
-        });
-      }
-    }
-  }
+  const ports = convertPortsToArray(info.NetworkSettings.Ports);
 
   // For macvlan/ipvlan networks, get container IP instead of port mapping
   let containerIP = null;
@@ -2933,6 +2943,57 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
   }
 });
 
+// Helper: Toggle addon pack (behavior or resource)
+async function toggleAddonPack(packPath, worldPath, configFileName) {
+  if (!await fs.pathExists(packPath)) {
+    return { toggled: false, enabled: false };
+  }
+
+  const manifestPath = path.join(packPath, 'manifest.json');
+  if (!await fs.pathExists(manifestPath)) {
+    return { toggled: false, enabled: false };
+  }
+
+  let manifest;
+  try {
+    manifest = await parseManifestJson(manifestPath);
+  } catch (err) {
+    console.warn(`Failed to parse manifest at ${manifestPath}:`, err.message);
+    return { toggled: false, enabled: false };
+  }
+
+  if (!manifest?.header?.uuid) {
+    return { toggled: false, enabled: false };
+  }
+
+  const uuid = manifest.header.uuid;
+  const version = manifest.header.version;
+  const configFile = path.join(worldPath, configFileName);
+  
+  let packs = [];
+  if (await fs.pathExists(configFile)) {
+    packs = await fs.readJson(configFile);
+  }
+
+  const packIndex = packs.findIndex(p => p.pack_id === uuid);
+  const enabled = packIndex < 0; // Will be enabled if not currently in list
+
+  if (packIndex >= 0) {
+    // Disable - remove from list
+    packs.splice(packIndex, 1);
+  } else {
+    // Enable - add to list
+    packs.push({
+      pack_id: uuid,
+      version: version
+    });
+  }
+
+  // Save config
+  await fs.writeJson(configFile, packs, { spaces: 2 });
+  return { toggled: true, enabled };
+}
+
 // POST /api/servers/:id/addons/:name/toggle - Enable/disable addon
 app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
   try {
@@ -2944,100 +3005,23 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
     const worldPath = path.join(paths.worlds, worldName);
     await fs.ensureDir(worldPath);
 
-    let toggledBehavior = false;
-    let toggledResource = false;
-    let behaviorEnabled = false;
-    let resourceEnabled = false;
-
     // Handle behavior pack if it exists
     const behaviorPackPath = path.join(paths.behaviorPacks, name);
-    if (await fs.pathExists(behaviorPackPath)) {
-      const manifestPath = path.join(behaviorPackPath, 'manifest.json');
-      if (await fs.pathExists(manifestPath)) {
-        let manifest;
-        try {
-          manifest = await parseManifestJson(manifestPath);
-        } catch (err) {
-          console.warn(`Failed to parse manifest for behavior pack ${name}:`, err.message);
-          // Continue without manifest data
-        }
-
-        if (manifest?.header?.uuid) {
-          const uuid = manifest.header.uuid;
-          const version = manifest.header.version;
-
-          const configFile = path.join(worldPath, 'world_behavior_packs.json');
-          let packs = [];
-          if (await fs.pathExists(configFile)) {
-            packs = await fs.readJson(configFile);
-          }
-
-          const packIndex = packs.findIndex(p => p.pack_id === uuid);
-
-          if (packIndex >= 0) {
-            // Disable - remove from list
-            packs.splice(packIndex, 1);
-          } else {
-            // Enable - add to list
-            packs.push({
-              pack_id: uuid,
-              version: version
-            });
-            behaviorEnabled = true;
-          }
-
-          // Save config
-          await fs.writeJson(configFile, packs, { spaces: 2 });
-          toggledBehavior = true;
-        }
-      }
-    }
+    const behaviorResult = await toggleAddonPack(
+      behaviorPackPath, 
+      worldPath, 
+      'world_behavior_packs.json'
+    );
 
     // Handle resource pack if it exists
     const resourcePackPath = path.join(paths.resourcePacks, name);
-    if (await fs.pathExists(resourcePackPath)) {
-      const manifestPath = path.join(resourcePackPath, 'manifest.json');
-      if (await fs.pathExists(manifestPath)) {
-        let manifest;
-        try {
-          manifest = await parseManifestJson(manifestPath);
-        } catch (err) {
-          console.warn(`Failed to parse manifest for resource pack ${name}:`, err.message);
-          // Continue without manifest data
-        }
+    const resourceResult = await toggleAddonPack(
+      resourcePackPath, 
+      worldPath, 
+      'world_resource_packs.json'
+    );
 
-        if (manifest?.header?.uuid) {
-          const uuid = manifest.header.uuid;
-          const version = manifest.header.version;
-
-          const configFile = path.join(worldPath, 'world_resource_packs.json');
-          let packs = [];
-          if (await fs.pathExists(configFile)) {
-            packs = await fs.readJson(configFile);
-          }
-
-          const packIndex = packs.findIndex(p => p.pack_id === uuid);
-
-          if (packIndex >= 0) {
-            // Disable - remove from list
-            packs.splice(packIndex, 1);
-          } else {
-            // Enable - add to list
-            packs.push({
-              pack_id: uuid,
-              version: version
-            });
-            resourceEnabled = true;
-          }
-
-          // Save config
-          await fs.writeJson(configFile, packs, { spaces: 2 });
-          toggledResource = true;
-        }
-      }
-    }
-
-    if (!toggledBehavior && !toggledResource) {
+    if (!behaviorResult.toggled && !resourceResult.toggled) {
       return res.status(404).json({ error: 'Addon not found' });
     }
 
@@ -3045,18 +3029,18 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
     setTimeout(() => broadcastServerDetails(req.params.id), 500);
 
     let message = '';
-    if (toggledBehavior && toggledResource) {
-      message = behaviorEnabled || resourceEnabled ? 'Addon enabled' : 'Addon disabled';
-    } else if (toggledBehavior) {
-      message = behaviorEnabled ? 'Behavior pack enabled' : 'Behavior pack disabled';
-    } else if (toggledResource) {
-      message = resourceEnabled ? 'Resource pack enabled' : 'Resource pack disabled';
+    if (behaviorResult.toggled && resourceResult.toggled) {
+      message = behaviorResult.enabled || resourceResult.enabled ? 'Addon enabled' : 'Addon disabled';
+    } else if (behaviorResult.toggled) {
+      message = behaviorResult.enabled ? 'Behavior pack enabled' : 'Behavior pack disabled';
+    } else if (resourceResult.toggled) {
+      message = resourceResult.enabled ? 'Resource pack enabled' : 'Resource pack disabled';
     }
 
     res.json({
       message: message,
-      behaviorEnabled: behaviorEnabled,
-      resourceEnabled: resourceEnabled
+      behaviorEnabled: behaviorResult.enabled,
+      resourceEnabled: resourceResult.enabled
     });
   } catch (err) {
     console.error('Error toggling addon:', err);
