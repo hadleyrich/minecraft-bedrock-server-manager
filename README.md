@@ -285,7 +285,7 @@ sudo chown $USER:$USER /opt/minecraft-servers #change this to your data director
 #### 4. **Start the Application**
 
 ```bash
-# Start the app (run on PM2)
+# Start the application
 npm start
 ```
 

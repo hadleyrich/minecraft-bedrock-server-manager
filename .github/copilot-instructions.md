@@ -11,7 +11,6 @@ This is a full-stack web application for managing multiple Minecraft Bedrock Edi
 - **Real-time Communication**: Socket.IO (WebSockets with HTTP polling fallback)
 - **Docker Management**: Dockerode library
 - **UI Components**: SweetAlert2 for modals and alerts
-- **Process Management**: PM2 for production deployment
 - **CSS Framework**: Tailwind CSS (build process required)
 
 ## Architecture
@@ -213,7 +212,7 @@ npm run build:css        # Watch mode for Tailwind CSS
 ```bash
 npm run build:css:prod   # Minified CSS
 npm run copy-assets      # Copy SweetAlert2 assets
-npm start                # PM2 cluster mode
+npm start                # Start the application
 ```
 
 ### WebSocket Setup
@@ -270,7 +269,7 @@ npm run setup            # Installs socket.io and downloads client library
 
 ## Debugging Tips
 
-1. **Server Logs**: Check PM2 logs with `npm run pm2:logs`
+1. **Server Logs**: Check server output with standard output/error logs
 2. **Docker Logs**: Stream container logs via `/api/servers/:id/logs`
 3. **WebSocket**: Use browser DevTools Network tab to monitor WebSocket frames
 4. **Cache Issues**: Clear cache with `serverCache.clear()` or `fileCache.clear()`
@@ -297,8 +296,6 @@ When working on this repository:
 - **public/index.html** (3218 lines): Entire frontend SPA
 - **public/styles.css**: Tailwind input file (builds to output.css)
 - **package.json**: Dependencies and npm scripts
-- **ecosystem.config.js**: PM2 configuration
-- **setup-websocket.js**: WebSocket setup utility
 - **Dockerfile**: Container definition for the manager itself
 - **.env**: Environment configuration (not in repo, see env.txt)
 
