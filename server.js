@@ -81,6 +81,7 @@ async function readCachedFile(filePath, parser = 'text') {
     fileCache.set(cacheKey, { data, timestamp: now });
     return data;
   } catch (err) {
+    console.error('Error reading cached file:', err);
     throw err;
   }
 }
@@ -173,6 +174,7 @@ async function getCachedServerInfo(serverId) {
 
       playerCount = await Promise.race([playerPromise, timeoutPromise]);
     } catch (err) {
+      console.warn('Error getting player count:', err.message);
       playerCount = 0;
     }
   }
@@ -283,6 +285,7 @@ async function fetchXuidsBatch(players, concurrency = 3) {
           return { name: player.name, xuid: null };
         }
       } catch (err) {
+        console.warn(`Error fetching XUID for ${player.name}:`, err.message);
         return { name: player.name, xuid: null };
       }
     });
@@ -587,7 +590,7 @@ app.get('/api/servers/orphaned', async (req, res) => {
     const containers = await docker.listContainers({ all: true });
     const existingServerIds = new Set(
       containers
-        .filter(c => c.Labels && c.Labels['server-id'])
+        .filter(c => c.Labels?.['server-id'])
         .map(c => c.Labels['server-id'])
     );
 
@@ -714,8 +717,8 @@ app.post('/api/servers/import', async (req, res) => {
         await container.stop();
         console.log(`Stopped container: ${trimmedName}`);
       }
-    } catch (stopErr) {
-      console.warn(`Failed to stop container ${trimmedName}:`, stopErr.message);
+    } catch (error_) {
+      console.warn(`Failed to stop container ${trimmedName}:`, error_.message);
       // Continue anyway
     }
 
@@ -748,8 +751,8 @@ app.post('/api/servers/import', async (req, res) => {
         });
       });
       console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
-    } catch (pullErr) {
-      console.error('Failed to pull Docker image:', pullErr);
+    } catch (error_) {
+      console.error('Failed to pull Docker image:', error_);
       // Continue anyway
     }
 
@@ -939,9 +942,9 @@ app.post('/api/servers/:id/start', async (req, res) => {
       invalidateServerCache(req.params.id);
       setTimeout(() => broadcastServerUpdate(req.params.id), 2000);
       res.json({ message: 'Server started' });
-    } catch (startErr) {
+    } catch (error_) {
       // Check if it's a port conflict error
-      const errorMessage = startErr.message || '';
+      const errorMessage = error_.message || '';
       if (errorMessage.includes('port is already allocated') || errorMessage.includes('Bind for') || errorMessage.includes('failed programming external connectivity')) {
         // Get container info
         const containerInfo = await container.inspect();
@@ -1115,8 +1118,8 @@ app.post('/api/servers/:id/recreate', async (req, res) => {
     try {
       console.log(`Pulling Docker image: ${BEDROCK_IMAGE}`);
       await docker.getImage(BEDROCK_IMAGE).inspect();
-    } catch (err) {
-      console.log(`Image not found locally, pulling ${BEDROCK_IMAGE}...`);
+    } catch (error_) {
+      console.warn(`Image not found locally, pulling ${BEDROCK_IMAGE}...`);
       const stream = await docker.pull(BEDROCK_IMAGE);
       await new Promise((resolve, reject) => {
         docker.modem.followProgress(stream, (err, output) => {
@@ -1251,8 +1254,8 @@ app.post('/api/servers/:id/rename', async (req, res) => {
         });
       });
       console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
-    } catch (pullErr) {
-      console.error('Failed to pull Docker image:', pullErr);
+    } catch (error_) {
+      console.error('Failed to pull Docker image:', error_);
       // Continue anyway, as the image might already exist or pull might fail but image is available
     }
 
@@ -1477,8 +1480,8 @@ app.put('/api/servers/:id/memory', async (req, res) => {
         });
       });
       console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
-    } catch (pullErr) {
-      console.error('Failed to pull Docker image:', pullErr);
+    } catch (error_) {
+      console.error('Failed to pull Docker image:', error_);
       // Continue anyway, as the image might already exist or pull might fail but image is available
     }
 
@@ -1685,6 +1688,7 @@ app.get('/api/servers/:id/players', async (req, res) => {
         tail: 20
       });
     } catch (err) {
+      console.warn('Container operations failed (container may be stopped):', err.message);
       // If container operations fail (e.g., container stopped), return empty list
       return res.json([]);
     }
@@ -1725,7 +1729,8 @@ app.get('/api/servers/:id/players', async (req, res) => {
         playerCache = JSON.parse(cacheContent);
       }
     } catch (err) {
-      // Ignore
+      console.warn('Failed to read player cache:', err.message);
+      // Ignore - cache will be empty
     }
 
     // Get XUID for each player from cache or external API
@@ -1743,6 +1748,7 @@ app.get('/api/servers/:id/players', async (req, res) => {
             player.xuid = null;
           }
         } catch (err) {
+          console.warn(`Failed to fetch XUID for ${player.name}:`, err.message);
           player.xuid = null;
         }
         // Add small delay to avoid rate limiting
@@ -1754,7 +1760,8 @@ app.get('/api/servers/:id/players', async (req, res) => {
     try {
       await fs.writeJson(cachePath, playerCache, { spaces: 2 });
     } catch (err) {
-      // Ignore
+      console.warn('Failed to write player cache:', err.message);
+      // Ignore - cache write failure is not critical
     }
 
     // Check operators from permissions.json
@@ -1766,7 +1773,8 @@ app.get('/api/servers/:id/players', async (req, res) => {
         permissions = JSON.parse(permissionsContent);
       }
     } catch (err) {
-      // Ignore
+      console.warn('Failed to read permissions.json:', err.message);
+      // Ignore - permissions will be empty
     }
 
     // Mark operators
@@ -2461,6 +2469,7 @@ async function getWorldName(serverId) {
     }
     return 'Bedrock level';
   } catch (err) {
+    console.warn('Failed to get level name:', err.message);
     return 'Bedrock level';
   }
 }
@@ -2493,7 +2502,7 @@ function generatePackFolderName(addonName, suffix) {
     .replaceAll(/[^a-zA-Z0-9\s\-_]/g, '') // Remove special chars except space, dash, underscore
     .replaceAll(/\s+/g, '_') // Replace spaces with underscores
     .replaceAll(/_+/g, '_') // Replace multiple underscores with single
-    .replaceAll(/^(_+)|(_+)$/g, ''); // Trim underscores from start/end
+    .replaceAll(/^(_+)$|^(_+)|(_+)$/g, ''); // Trim underscores from start/end
 
   // Ensure baseName is not empty
   if (!baseName) {
@@ -2774,7 +2783,7 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
       let processedItems = 0;
 
       // Generate base name for this mcaddon file (without suffix)
-      const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)|(_+)$/g, '');
+      const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)$|^(_+)|(_+)$/g, '');
       const addonBaseName = baseName || 'unknown_addon';
 
       for (const item of extractedItems) {
@@ -2813,6 +2822,7 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
                 await fs.copy(itemPath, destPath, { overwrite: true });
                 processedItems++;
               } catch (err) {
+                console.warn('Failed to copy to world path, falling back to resource_packs:', err.message);
                 const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
                 const destPath = path.join(paths.resourcePacks, folderName);
                 await fs.copy(itemPath, destPath, { overwrite: true });
@@ -2967,7 +2977,6 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
           if (packIndex >= 0) {
             // Disable - remove from list
             packs.splice(packIndex, 1);
-            behaviorEnabled = false;
           } else {
             // Enable - add to list
             packs.push({
@@ -3012,7 +3021,6 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
           if (packIndex >= 0) {
             // Disable - remove from list
             packs.splice(packIndex, 1);
-            resourceEnabled = false;
           } else {
             // Enable - add to list
             packs.push({
@@ -3394,6 +3402,7 @@ async function broadcastServerDetails(serverId) {
               tail: 15
             });
           } catch (err) {
+            console.warn('Failed to get container logs:', err.message);
             return;
           }
 
