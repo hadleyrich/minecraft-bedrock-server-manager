@@ -189,6 +189,7 @@ async function recreateServers() {
                 const containerConfig = {
                     Image: BEDROCK_IMAGE,
                     name: serverId,
+                    User: '1000:1000',
                     Labels: {
                         'server-id': serverId,
                         'server-name': metadata.name || 'Bedrock Server'
