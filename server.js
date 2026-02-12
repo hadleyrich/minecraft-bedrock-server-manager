@@ -62,6 +62,11 @@ function invalidateFileCache(filePath) {
   }
 }
 
+// Helper function to clean player names
+function cleanPlayerName(name) {
+  return name.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim();
+}
+
 // Cached server info
 async function getCachedServerInfo(serverId) {
   const cacheKey = `server:${serverId}`;
@@ -120,14 +125,14 @@ async function getCachedServerInfo(serverId) {
         const lines = logText.trim().split('\n');
         let lastIndex = -1;
         for (let i = 0; i < lines.length; i++) {
-          if (lines[i].includes('players online:')) {
+          if (lines[i].toLowerCase().includes('players online:')) {
             lastIndex = i;
           }
         }
         if (lastIndex >= 0) {
           // Extract player names from the same line (format: "There are X/Y players online: player1, player2, ...")
           const line = lines[lastIndex];
-          const colonIndex = line.indexOf('players online:');
+          const colonIndex = line.toLowerCase().indexOf('players online:');
           if (colonIndex >= 0) {
             const playersPart = line.substring(colonIndex + 'players online:'.length).trim();
             if (playersPart) {
@@ -1453,7 +1458,7 @@ app.get('/api/servers/:id/players', async (req, res) => {
     // Find the LAST line with player list from the command output (most recent)
     let lastIndex = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('players online:')) {
+      if (lines[i].toLowerCase().includes('players online:')) {
         lastIndex = i;
       }
     }
@@ -1461,12 +1466,12 @@ app.get('/api/servers/:id/players', async (req, res) => {
     if (lastIndex >= 0) {
       // Parse players from the same line (format: "There are X/Y players online: player1, player2, ...")
       const line = lines[lastIndex];
-      const colonIndex = line.indexOf('players online:');
+      const colonIndex = line.toLowerCase().indexOf('players online:');
       if (colonIndex >= 0) {
         const playersPart = line.substring(colonIndex + 'players online:'.length).trim();
         if (playersPart) {
           // Split by comma and clean each name
-          const names = playersPart.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
+          const names = playersPart.split(',').map(n => cleanPlayerName(n)).filter(Boolean);
           players.push(...names.map(name => ({ name })));
         }
       }
@@ -3159,7 +3164,7 @@ async function broadcastServerDetails(serverId) {
 
           let lastIndex = -1;
           for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes('players online:')) {
+            if (lines[i].toLowerCase().includes('players online:')) {
               lastIndex = i;
             }
           }
@@ -3167,11 +3172,11 @@ async function broadcastServerDetails(serverId) {
           if (lastIndex >= 0) {
             // Parse players from the same line (format: "There are X/Y players online: player1, player2, ...")
             const line = lines[lastIndex];
-            const colonIndex = line.indexOf('players online:');
+            const colonIndex = line.toLowerCase().indexOf('players online:');
             if (colonIndex >= 0) {
               const playersPart = line.substring(colonIndex + 'players online:'.length).trim();
               if (playersPart) {
-                const names = playersPart.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
+                const names = playersPart.split(',').map(n => cleanPlayerName(n)).filter(Boolean);
                 players_temp.push(...names.map(name => ({ name })));
               }
             }
