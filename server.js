@@ -181,8 +181,19 @@ async function getCachedServerInfo(serverId) {
 
   // For macvlan/ipvlan networks, get container IP instead of port mapping
   let containerIP = null;
-  if (!requiresPortMapping(metadata)) {
+  let shouldCacheIP = true;
+
+  // Extract network name from container
+  const networks = info.NetworkSettings.Networks;
+  const networkName = networks && Object.keys(networks).length > 0 ? Object.keys(networks)[0] : null;
+  const needsPortMapping = await networkRequiresPortMapping(networkName);
+
+  if (!needsPortMapping) {
     containerIP = getContainerIPAddress(info);
+    // Don't cache null IPs for running containers - they may still be initializing
+    if (!containerIP && info.State.Status === 'running') {
+      shouldCacheIP = false;
+    }
   }
 
   const serverData = {
@@ -203,7 +214,10 @@ async function getCachedServerInfo(serverId) {
     webPort: PORT
   };
 
-  serverCache.set(cacheKey, { data: serverData, timestamp: now });
+  // Only cache if IP is present for macvlan, or always cache for other network types
+  if (shouldCacheIP) {
+    serverCache.set(cacheKey, { data: serverData, timestamp: now });
+  }
   return serverData;
 }
 
@@ -386,15 +400,19 @@ function buildContainerEnv(metadata, overrides = {}) {
 // Helper: Get server data path
 const getServerPath = (serverId) => path.join(DATA_DIR, serverId);
 
-// Helper: Check if network mode requires port mapping
-const requiresPortMapping = (metadata) => {
-  const networkMode = metadata.network || DOCKER_NETWORK;
-  if (!networkMode) return true; // Default bridge mode needs port mapping
+// Helper: Check if a network requires port mapping by inspecting its driver
+const networkRequiresPortMapping = async (networkName) => {
+  if (!networkName) return true; // Default bridge needs port mapping
 
-  // macvlan and ipvlan networks don't need port mapping
-  // Containers get their own IP addresses
-  const noPortMappingModes = ['macvlan', 'ipvlan'];
-  return !noPortMappingModes.some(mode => networkMode.toLowerCase().includes(mode));
+  try {
+    const network = await docker.getNetwork(networkName).inspect();
+    const driver = network.Driver;
+    // macvlan and ipvlan drivers don't need port mapping
+    return driver !== 'macvlan' && driver !== 'ipvlan';
+  } catch (err) {
+    console.warn(`Failed to inspect network ${networkName}:`, err.message);
+    return true; // Default to port mapping on error
+  }
 };
 
 // Helper: Get container IP address for networks without port mapping
@@ -407,27 +425,39 @@ const getContainerIPAddress = (containerInfo) => {
     const networkNames = Object.keys(networks);
     for (const netName of networkNames) {
       const ip = networks[netName].IPAddress;
-      if (ip) return ip;
+      if (ip) {
+        return ip;
+      }
     }
+    // No IP found - this is normal for containers still initializing on macvlan
+    return null;
   } catch (err) {
     console.error('Failed to get container IP:', err);
   }
   return null;
 };
 
-// Helper: Apply network configuration to container config
-const applyNetworkConfig = (containerConfig, metadata) => {
-  if (metadata.network || DOCKER_NETWORK) {
-    if (!containerConfig.HostConfig) {
-      containerConfig.HostConfig = {};
-    }
-    containerConfig.HostConfig.NetworkMode = metadata.network || DOCKER_NETWORK;
-  }
+// Helper: Get network name from metadata
+const getNetworkName = (metadata) => {
+  return metadata.network || DOCKER_NETWORK;
 };
 
-// Helper: Apply port configuration to container config (only if port mapping is needed)
-const applyPortConfig = async (containerConfig, metadata, existingPort = null) => {
-  if (!requiresPortMapping(metadata)) {
+// Helper: Apply network and port configuration to container config
+const applyNetworkAndPortConfig = async (containerConfig, networkName, existingPort = null) => {
+  // Ensure HostConfig exists
+  if (!containerConfig.HostConfig) {
+    containerConfig.HostConfig = {};
+  }
+
+  // Apply network configuration
+  if (networkName) {
+    containerConfig.HostConfig.NetworkMode = networkName;
+  }
+
+  // Check if network requires port mapping
+  const needsPortMapping = await networkRequiresPortMapping(networkName);
+
+  if (!needsPortMapping) {
     // For macvlan/ipvlan, expose the port but don't bind to host
     containerConfig.ExposedPorts = { '19132/udp': {} };
     return null; // No host port
@@ -435,9 +465,6 @@ const applyPortConfig = async (containerConfig, metadata, existingPort = null) =
 
   // Standard port mapping for bridge/host networks
   const gamePort = existingPort || await findAvailablePort(19132);
-  if (!containerConfig.HostConfig) {
-    containerConfig.HostConfig = {};
-  }
   containerConfig.HostConfig.PortBindings = {
     '19132/udp': [{ HostPort: gamePort.toString() }]
   };
@@ -639,8 +666,8 @@ app.post('/api/servers/import', async (req, res) => {
       }
     };
 
-    applyNetworkConfig(containerConfig, metadata);
-    const gamePort = await applyPortConfig(containerConfig, metadata);
+    const networkName = getNetworkName(metadata);
+    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName);
 
     const newContainer = await docker.createContainer(containerConfig);
 
@@ -740,11 +767,9 @@ app.post('/api/servers', async (req, res) => {
       }
     };
 
-    // Apply network configuration
-    applyNetworkConfig(containerConfig, metadata);
-
-    // Apply port configuration (handles both port mapping and network-based configurations)
-    const gamePort = await applyPortConfig(containerConfig, metadata);
+    // Apply network and port configuration
+    const networkName = getNetworkName(metadata);
+    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName);
 
     // Create and start container
     const container = await docker.createContainer(containerConfig);
@@ -855,8 +880,8 @@ app.post('/api/servers/:id/start', async (req, res) => {
           }
         };
 
-        applyNetworkConfig(containerConfig, metadata);
-        const newGamePort = await applyPortConfig(containerConfig, metadata);
+        const networkName = getNetworkName(metadata);
+        const newGamePort = await applyNetworkAndPortConfig(containerConfig, networkName);
 
         // Update metadata with actual container name
         const metadataPath2 = path.join(serverPath, 'metadata.json');
@@ -1005,8 +1030,8 @@ app.post('/api/servers/:id/rename', async (req, res) => {
       }
     };
 
-    applyNetworkConfig(containerConfig, metadata);
-    const gamePort = await applyPortConfig(containerConfig, metadata, containerInfo.HostConfig.PortBindings?.['19132/udp']?.[0]?.HostPort);
+    const networkName = getNetworkName(metadata);
+    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName, containerInfo.HostConfig.PortBindings?.['19132/udp']?.[0]?.HostPort);
 
     const newContainer = await docker.createContainer(containerConfig);
 
@@ -1110,8 +1135,8 @@ app.post('/api/servers/:id/version', async (req, res) => {
       }
     };
 
-    applyNetworkConfig(containerConfig, metadata);
-    const gamePort = await applyPortConfig(containerConfig, metadata, containerInfo.HostConfig.PortBindings?.['19132/udp']?.[0]?.HostPort);
+    const networkName = getNetworkName(metadata);
+    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName, containerInfo.HostConfig.PortBindings?.['19132/udp']?.[0]?.HostPort);
 
     const newContainer = await docker.createContainer(containerConfig);
 
@@ -1229,8 +1254,8 @@ app.put('/api/servers/:id/memory', async (req, res) => {
       }
     };
 
-    applyNetworkConfig(containerConfig, metadata);
-    const gamePort = await applyPortConfig(containerConfig, metadata, containerInfo.HostConfig.PortBindings?.['19132/udp']?.[0]?.HostPort);
+    const networkName = getNetworkName(metadata);
+    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName, containerInfo.HostConfig.PortBindings?.['19132/udp']?.[0]?.HostPort);
 
     const newContainer = await docker.createContainer(containerConfig);
 
