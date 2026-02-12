@@ -40,7 +40,6 @@ function demuxDockerStream(buffer) {
     if (offset + 8 > buffer.length) break;
 
     // Read the 8-byte header
-    const streamType = buffer[offset];
     const payloadLength = buffer.readUInt32BE(offset + 4);
 
     // Skip header and read payload
