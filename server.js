@@ -387,9 +387,7 @@ function buildContainerEnv(metadata, overrides = {}) {
   const env = [
     'EULA=TRUE',
     'VERSION=' + (overrides.version || metadata.version || 'LATEST'),
-    'SERVER_NAME=' + (overrides.name || metadata.name || 'Bedrock Server'),
-    'UID=1000',
-    'GID=1000'
+    'SERVER_NAME=' + (overrides.name || metadata.name || 'Bedrock Server')
   ];
 
   if (ENABLE_SSH) {
@@ -654,6 +652,7 @@ app.post('/api/servers/import', async (req, res) => {
     const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
+      User: '1000:1000',
       Labels: {
         'server-id': serverId,
         'server-name': serverName
@@ -755,6 +754,7 @@ app.post('/api/servers', async (req, res) => {
     const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
+      User: '1000:1000',
       Labels: {
         'server-id': serverId,
         'server-name': name
@@ -868,6 +868,7 @@ app.post('/api/servers/:id/start', async (req, res) => {
         const containerConfig = {
           Image: BEDROCK_IMAGE,
           name: serverId,
+          User: '1000:1000',
           Labels: {
             'server-id': serverId,
             'server-name': metadata.name || serverId
@@ -1018,6 +1019,7 @@ app.post('/api/servers/:id/rename', async (req, res) => {
     const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
+      User: '1000:1000',
       Labels: {
         'server-id': serverId,
         'server-name': name.trim()
@@ -1123,6 +1125,7 @@ app.post('/api/servers/:id/version', async (req, res) => {
     const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
+      User: '1000:1000',
       Labels: {
         'server-id': serverId,
         'server-name': metadata.name
@@ -1242,6 +1245,7 @@ app.put('/api/servers/:id/memory', async (req, res) => {
     const containerConfig = {
       Image: BEDROCK_IMAGE,
       name: serverId,
+      User: '1000:1000',
       Labels: {
         'server-id': serverId,
         'server-name': metadata.name

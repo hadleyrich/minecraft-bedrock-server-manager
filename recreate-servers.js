@@ -50,9 +50,7 @@ function buildContainerEnv(metadata) {
     const env = [
         'EULA=TRUE',
         'VERSION=' + (metadata.version || 'LATEST'),
-        'SERVER_NAME=' + (metadata.name || 'Bedrock Server'),
-        'UID=1000',
-        'GID=1000'
+        'SERVER_NAME=' + (metadata.name || 'Bedrock Server')
     ];
 
     if (ENABLE_SSH) {
@@ -191,6 +189,7 @@ async function recreateServers() {
                 const containerConfig = {
                     Image: BEDROCK_IMAGE,
                     name: serverId,
+                    User: '1000:1000',
                     Labels: {
                         'server-id': serverId,
                         'server-name': metadata.name || 'Bedrock Server'
