@@ -2512,7 +2512,7 @@ function generatePackFolderName(addonName, suffix) {
     .replaceAll(/[^a-zA-Z0-9\s\-_]/g, '') // Remove special chars except space, dash, underscore
     .replaceAll(/\s+/g, '_') // Replace spaces with underscores
     .replaceAll(/_+/g, '_') // Replace multiple underscores with single
-    .replaceAll(/^(_+)$|^(_+)|(_+)$/g, ''); // Trim underscores from start/end
+    .replaceAll(/^(_+)|(_+)$/g, ''); // Trim underscores from start/end
 
   // Ensure baseName is not empty
   if (!baseName) {
@@ -2732,7 +2732,7 @@ async function processMcAddon(filePath, originalName, paths, serverId, io) {
   let processedItems = 0;
 
   // Generate base name for this mcaddon file (without suffix)
-  const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)$|^(_+)|(_+)$/g, '');
+  const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)|(_+)$/g, '');
   const addonBaseName = baseName || 'unknown_addon';
 
   for (const item of extractedItems) {
@@ -2771,7 +2771,7 @@ async function processMcAddon(filePath, originalName, paths, serverId, io) {
             await fs.copy(itemPath, destPath, { overwrite: true });
             processedItems++;
           } catch (err) {
-            console.warn('Failed to copy to world path, falling back to resource_packs:', err.message);
+            console.warn('Failed to determine pack type from manifest, defaulting to resource pack:', err.message);
             const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
             const destPath = path.join(paths.resourcePacks, folderName);
             await fs.copy(itemPath, destPath, { overwrite: true });
@@ -3411,7 +3411,7 @@ async function loadAndUpdatePlayerCache(serverId, players) {
       playerCache = JSON.parse(cacheContent);
     }
   } catch (err) {
-    console.error(`Failed to read player cache:`, err.message);
+    console.warn(`Failed to read player cache:`, err.message);
   }
 
   const uncachedPlayers = players.filter(p => !playerCache[p.name]);
@@ -3426,7 +3426,7 @@ async function loadAndUpdatePlayerCache(serverId, players) {
     try {
       await fs.writeJson(cachePath, playerCache, { spaces: 2 });
     } catch (err) {
-      console.error(`Failed to write player cache:`, err.message);
+      console.warn(`Failed to write player cache:`, err.message);
     }
   }
 
@@ -3450,7 +3450,7 @@ async function markOperators(serverId, players) {
       permissions = JSON.parse(permissionsContent);
     }
   } catch (err) {
-    console.error(`Failed to read permissions:`, err.message);
+    console.warn(`Failed to read permissions:`, err.message);
   }
 
   const operatorXuids = new Set(permissions.filter(p => p.permission === 'operator').map(p => p.xuid));
@@ -3479,7 +3479,7 @@ async function loadServerConfig(serverId) {
       });
     }
   } catch (err) {
-    console.error(`Failed to read server config:`, err.message);
+    console.warn(`Failed to read server config:`, err.message);
   }
   return config;
 }
