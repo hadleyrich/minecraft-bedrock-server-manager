@@ -17,6 +17,9 @@ const serverCache = new Map();
 const fileCache = new Map();
 const CACHE_TTL = 30000; // 30 seconds
 
+// Constant for player list parsing
+const PLAYERS_ONLINE_TEXT = 'players online:';
+
 // Debounce function for broadcasts
 function debounce(func, wait) {
   let timeout;
@@ -62,7 +65,13 @@ function invalidateFileCache(filePath) {
   }
 }
 
-// Helper function to clean player names
+/**
+ * Cleans player names by removing non-printable characters and quotes.
+ * Minecraft Bedrock logs may contain non-ASCII characters or control characters
+ * that need to be stripped for proper display and processing.
+ * @param {string} name - The raw player name from logs
+ * @returns {string} Cleaned player name with only printable ASCII characters
+ */
 function cleanPlayerName(name) {
   return name.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim();
 }
@@ -125,16 +134,16 @@ async function getCachedServerInfo(serverId) {
         const lines = logText.trim().split('\n');
         let lastIndex = -1;
         for (let i = 0; i < lines.length; i++) {
-          if (lines[i].toLowerCase().includes('players online:')) {
+          if (lines[i].toLowerCase().includes(PLAYERS_ONLINE_TEXT)) {
             lastIndex = i;
           }
         }
         if (lastIndex >= 0) {
           // Extract player names from the same line (format: "There are X/Y players online: player1, player2, ...")
           const line = lines[lastIndex];
-          const colonIndex = line.toLowerCase().indexOf('players online:');
+          const colonIndex = line.toLowerCase().indexOf(PLAYERS_ONLINE_TEXT);
           if (colonIndex >= 0) {
-            const playersPart = line.substring(colonIndex + 'players online:'.length).trim();
+            const playersPart = line.substring(colonIndex + PLAYERS_ONLINE_TEXT.length).trim();
             if (playersPart) {
               const names = playersPart.split(',').map(n => n.trim()).filter(Boolean);
               playerCount = names.length;
@@ -1458,7 +1467,7 @@ app.get('/api/servers/:id/players', async (req, res) => {
     // Find the LAST line with player list from the command output (most recent)
     let lastIndex = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].toLowerCase().includes('players online:')) {
+      if (lines[i].toLowerCase().includes(PLAYERS_ONLINE_TEXT)) {
         lastIndex = i;
       }
     }
@@ -1466,9 +1475,9 @@ app.get('/api/servers/:id/players', async (req, res) => {
     if (lastIndex >= 0) {
       // Parse players from the same line (format: "There are X/Y players online: player1, player2, ...")
       const line = lines[lastIndex];
-      const colonIndex = line.toLowerCase().indexOf('players online:');
+      const colonIndex = line.toLowerCase().indexOf(PLAYERS_ONLINE_TEXT);
       if (colonIndex >= 0) {
-        const playersPart = line.substring(colonIndex + 'players online:'.length).trim();
+        const playersPart = line.substring(colonIndex + PLAYERS_ONLINE_TEXT.length).trim();
         if (playersPart) {
           // Split by comma and clean each name
           const names = playersPart.split(',').map(n => cleanPlayerName(n)).filter(Boolean);
@@ -3164,7 +3173,7 @@ async function broadcastServerDetails(serverId) {
 
           let lastIndex = -1;
           for (let i = 0; i < lines.length; i++) {
-            if (lines[i].toLowerCase().includes('players online:')) {
+            if (lines[i].toLowerCase().includes(PLAYERS_ONLINE_TEXT)) {
               lastIndex = i;
             }
           }
@@ -3172,9 +3181,9 @@ async function broadcastServerDetails(serverId) {
           if (lastIndex >= 0) {
             // Parse players from the same line (format: "There are X/Y players online: player1, player2, ...")
             const line = lines[lastIndex];
-            const colonIndex = line.toLowerCase().indexOf('players online:');
+            const colonIndex = line.toLowerCase().indexOf(PLAYERS_ONLINE_TEXT);
             if (colonIndex >= 0) {
-              const playersPart = line.substring(colonIndex + 'players online:'.length).trim();
+              const playersPart = line.substring(colonIndex + PLAYERS_ONLINE_TEXT.length).trim();
               if (playersPart) {
                 const names = playersPart.split(',').map(n => cleanPlayerName(n)).filter(Boolean);
                 players_temp.push(...names.map(name => ({ name })));
