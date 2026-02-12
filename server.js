@@ -81,6 +81,7 @@ async function readCachedFile(filePath, parser = 'text') {
     fileCache.set(cacheKey, { data, timestamp: now });
     return data;
   } catch (err) {
+    console.error('Error reading cached file:', err);
     throw err;
   }
 }
@@ -92,6 +93,71 @@ function invalidateFileCache(filePath) {
       fileCache.delete(key);
     }
   }
+}
+
+// Helper: Get player count from running container
+async function getPlayerCountFromContainer(container) {
+  try {
+    const playerPromise = (async () => {
+      const exec = await container.exec({
+        Cmd: ['send-command', 'list'],
+        AttachStdout: true,
+        AttachStderr: true
+      });
+      await exec.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const logs = await container.logs({
+        stdout: true,
+        stderr: true,
+        tail: 20
+      });
+      const lines = demuxDockerStream(logs);
+      let lastIndex = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes('players online:')) {
+          lastIndex = i;
+        }
+      }
+      let playerCount = 0;
+      if (lastIndex >= 0) {
+        for (let i = lastIndex + 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
+            break;
+          }
+          if (line) playerCount++;
+        }
+      }
+      return playerCount;
+    })();
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Player count timeout')), 5000)
+    );
+
+    return await Promise.race([playerPromise, timeoutPromise]);
+  } catch (err) {
+    console.warn('Error getting player count:', err.message);
+    return 0;
+  }
+}
+
+// Helper: Convert Docker network ports to array format
+function convertPortsToArray(networkPorts) {
+  const ports = [];
+  for (const [key, bindings] of Object.entries(networkPorts || {})) {
+    if (bindings && bindings.length > 0) {
+      for (const binding of bindings) {
+        ports.push({
+          IP: binding.HostIp || '0.0.0.0',
+          PrivatePort: Number.parseInt(key.split('/')[0]),
+          PublicPort: Number.parseInt(binding.HostPort),
+          Type: key.split('/')[1]
+        });
+      }
+    }
+  }
+  return ports;
 }
 
 // Cached server info
@@ -132,50 +198,9 @@ async function getCachedServerInfo(serverId) {
   }
 
   // Get player count with timeout
-  let playerCount = 0;
-  if (info.State.Status === 'running') {
-    try {
-      const playerPromise = (async () => {
-        const exec = await container.exec({
-          Cmd: ['send-command', 'list'],
-          AttachStdout: true,
-          AttachStderr: true
-        });
-        await exec.start();
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const logs = await container.logs({
-          stdout: true,
-          stderr: true,
-          tail: 20
-        });
-        const lines = demuxDockerStream(logs);
-        let lastIndex = -1;
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].includes('players online:')) {
-            lastIndex = i;
-          }
-        }
-        if (lastIndex >= 0) {
-          for (let i = lastIndex + 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
-              break;
-            }
-            if (line) playerCount++;
-          }
-        }
-        return playerCount;
-      })();
-
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Player count timeout')), 5000)
-      );
-
-      playerCount = await Promise.race([playerPromise, timeoutPromise]);
-    } catch (err) {
-      playerCount = 0;
-    }
-  }
+  const playerCount = info.State.Status === 'running' 
+    ? await getPlayerCountFromContainer(container)
+    : 0;
 
   // Get max players from config
   let maxPlayers = 10;
@@ -195,20 +220,7 @@ async function getCachedServerInfo(serverId) {
   }
 
   // Convert ports to array format matching listContainers
-  const ports = [];
-  const networkPorts = info.NetworkSettings.Ports || {};
-  for (const [key, bindings] of Object.entries(networkPorts)) {
-    if (bindings && bindings.length > 0) {
-      for (const binding of bindings) {
-        ports.push({
-          IP: binding.HostIp || '0.0.0.0',
-          PrivatePort: Number.parseInt(key.split('/')[0]),
-          PublicPort: Number.parseInt(binding.HostPort),
-          Type: key.split('/')[1]
-        });
-      }
-    }
-  }
+  const ports = convertPortsToArray(info.NetworkSettings.Ports);
 
   // For macvlan/ipvlan networks, get container IP instead of port mapping
   let containerIP = null;
@@ -283,6 +295,7 @@ async function fetchXuidsBatch(players, concurrency = 3) {
           return { name: player.name, xuid: null };
         }
       } catch (err) {
+        console.warn(`Error fetching XUID for ${player.name}:`, err.message);
         return { name: player.name, xuid: null };
       }
     });
@@ -587,7 +600,7 @@ app.get('/api/servers/orphaned', async (req, res) => {
     const containers = await docker.listContainers({ all: true });
     const existingServerIds = new Set(
       containers
-        .filter(c => c.Labels && c.Labels['server-id'])
+        .filter(c => c.Labels?.['server-id'])
         .map(c => c.Labels['server-id'])
     );
 
@@ -714,8 +727,8 @@ app.post('/api/servers/import', async (req, res) => {
         await container.stop();
         console.log(`Stopped container: ${trimmedName}`);
       }
-    } catch (stopErr) {
-      console.warn(`Failed to stop container ${trimmedName}:`, stopErr.message);
+    } catch (error_) {
+      console.warn(`Failed to stop container ${trimmedName}:`, error_.message);
       // Continue anyway
     }
 
@@ -748,8 +761,8 @@ app.post('/api/servers/import', async (req, res) => {
         });
       });
       console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
-    } catch (pullErr) {
-      console.error('Failed to pull Docker image:', pullErr);
+    } catch (error_) {
+      console.error('Failed to pull Docker image:', error_);
       // Continue anyway
     }
 
@@ -939,9 +952,9 @@ app.post('/api/servers/:id/start', async (req, res) => {
       invalidateServerCache(req.params.id);
       setTimeout(() => broadcastServerUpdate(req.params.id), 2000);
       res.json({ message: 'Server started' });
-    } catch (startErr) {
+    } catch (error_) {
       // Check if it's a port conflict error
-      const errorMessage = startErr.message || '';
+      const errorMessage = error_.message || '';
       if (errorMessage.includes('port is already allocated') || errorMessage.includes('Bind for') || errorMessage.includes('failed programming external connectivity')) {
         // Get container info
         const containerInfo = await container.inspect();
@@ -1115,8 +1128,8 @@ app.post('/api/servers/:id/recreate', async (req, res) => {
     try {
       console.log(`Pulling Docker image: ${BEDROCK_IMAGE}`);
       await docker.getImage(BEDROCK_IMAGE).inspect();
-    } catch (err) {
-      console.log(`Image not found locally, pulling ${BEDROCK_IMAGE}...`);
+    } catch (error_) {
+      console.warn(`Image not found locally, pulling ${BEDROCK_IMAGE}...`);
       const stream = await docker.pull(BEDROCK_IMAGE);
       await new Promise((resolve, reject) => {
         docker.modem.followProgress(stream, (err, output) => {
@@ -1251,8 +1264,8 @@ app.post('/api/servers/:id/rename', async (req, res) => {
         });
       });
       console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
-    } catch (pullErr) {
-      console.error('Failed to pull Docker image:', pullErr);
+    } catch (error_) {
+      console.error('Failed to pull Docker image:', error_);
       // Continue anyway, as the image might already exist or pull might fail but image is available
     }
 
@@ -1477,8 +1490,8 @@ app.put('/api/servers/:id/memory', async (req, res) => {
         });
       });
       console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
-    } catch (pullErr) {
-      console.error('Failed to pull Docker image:', pullErr);
+    } catch (error_) {
+      console.error('Failed to pull Docker image:', error_);
       // Continue anyway, as the image might already exist or pull might fail but image is available
     }
 
@@ -1685,6 +1698,7 @@ app.get('/api/servers/:id/players', async (req, res) => {
         tail: 20
       });
     } catch (err) {
+      console.warn('Container operations failed (container may be stopped):', err.message);
       // If container operations fail (e.g., container stopped), return empty list
       return res.json([]);
     }
@@ -1725,7 +1739,8 @@ app.get('/api/servers/:id/players', async (req, res) => {
         playerCache = JSON.parse(cacheContent);
       }
     } catch (err) {
-      // Ignore
+      console.warn('Failed to read player cache:', err.message);
+      // Ignore - cache will be empty
     }
 
     // Get XUID for each player from cache or external API
@@ -1743,6 +1758,7 @@ app.get('/api/servers/:id/players', async (req, res) => {
             player.xuid = null;
           }
         } catch (err) {
+          console.warn(`Failed to fetch XUID for ${player.name}:`, err.message);
           player.xuid = null;
         }
         // Add small delay to avoid rate limiting
@@ -1754,7 +1770,8 @@ app.get('/api/servers/:id/players', async (req, res) => {
     try {
       await fs.writeJson(cachePath, playerCache, { spaces: 2 });
     } catch (err) {
-      // Ignore
+      console.warn('Failed to write player cache:', err.message);
+      // Ignore - cache write failure is not critical
     }
 
     // Check operators from permissions.json
@@ -1766,7 +1783,8 @@ app.get('/api/servers/:id/players', async (req, res) => {
         permissions = JSON.parse(permissionsContent);
       }
     } catch (err) {
-      // Ignore
+      console.warn('Failed to read permissions.json:', err.message);
+      // Ignore - permissions will be empty
     }
 
     // Mark operators
@@ -2461,6 +2479,7 @@ async function getWorldName(serverId) {
     }
     return 'Bedrock level';
   } catch (err) {
+    console.warn('Failed to get level name:', err.message);
     return 'Bedrock level';
   }
 }
@@ -2693,6 +2712,133 @@ app.options('/api/servers/:id/addons/upload', (req, res) => {
   res.status(200).end();
 });
 
+// Helper: Process mcaddon file extraction
+async function processMcAddon(filePath, originalName, paths, serverId, io) {
+  const ext = path.extname(originalName).toLowerCase();
+  const tempExtractPath = path.join('./temp', `extract-${Date.now()}`);
+  await fs.ensureDir(tempExtractPath);
+
+  const zip = new AdmZip(filePath);
+  zip.extractAllTo(tempExtractPath, true);
+
+  io.emit('upload-progress', {
+    serverId,
+    status: 'processing',
+    filename: originalName,
+    progress: 50
+  });
+
+  const extractedItems = await fs.readdir(tempExtractPath);
+  let processedItems = 0;
+
+  // Generate base name for this mcaddon file (without suffix)
+  const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)|(_+)$/g, '');
+  const addonBaseName = baseName || 'unknown_addon';
+
+  for (const item of extractedItems) {
+    const itemPath = path.join(tempExtractPath, item);
+    const stats = await fs.stat(itemPath);
+
+    if (stats.isDirectory()) {
+      if (item === 'behavior_packs' || item === 'behavior_pack') {
+        const behaviorItems = await fs.readdir(itemPath);
+        for (const pack of behaviorItems) {
+          const sourcePath = path.join(itemPath, pack);
+          const folderName = await generateUniquePackFolderName(paths.behaviorPacks, addonBaseName, '');
+          const destPath = path.join(paths.behaviorPacks, folderName);
+          await fs.copy(sourcePath, destPath, { overwrite: true });
+          processedItems++;
+        }
+      } else if (item === 'resource_packs' || item === 'resource_pack') {
+        const resourceItems = await fs.readdir(itemPath);
+        for (const pack of resourceItems) {
+          const sourcePath = path.join(itemPath, pack);
+          const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
+          const destPath = path.join(paths.resourcePacks, folderName);
+          await fs.copy(sourcePath, destPath, { overwrite: true });
+          processedItems++;
+        }
+      } else {
+        const manifestPath = path.join(itemPath, 'manifest.json');
+        if (await fs.pathExists(manifestPath)) {
+          try {
+            const manifest = await parseManifestJson(manifestPath);
+            const modules = manifest.modules || [];
+            const isBehavior = modules.some(m => m.type === 'data' || m.type === 'javascript' || m.type === 'script');
+            const targetPath = isBehavior ? paths.behaviorPacks : paths.resourcePacks;
+            const folderName = await generateUniquePackFolderName(targetPath, addonBaseName, '');
+            const destPath = path.join(targetPath, folderName);
+            await fs.copy(itemPath, destPath, { overwrite: true });
+            processedItems++;
+          } catch (err) {
+            console.warn('Failed to determine pack type from manifest, defaulting to resource pack:', err.message);
+            const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
+            const destPath = path.join(paths.resourcePacks, folderName);
+            await fs.copy(itemPath, destPath, { overwrite: true });
+            processedItems++;
+          }
+        }
+      }
+    }
+  }
+
+  await fs.remove(tempExtractPath);
+  return processedItems;
+}
+
+// Helper: Process mcpack file extraction
+async function processMcPack(filePath, originalName, targetDir) {
+  const ext = path.extname(originalName).toLowerCase();
+  const baseName = path.basename(originalName, ext);
+  const tempExtractPath = path.join('./temp', `extract-${Date.now()}`);
+  await fs.ensureDir(tempExtractPath);
+
+  const zip = new AdmZip(filePath);
+  zip.extractAllTo(tempExtractPath, true);
+
+  const extractedItems = await fs.readdir(tempExtractPath);
+  const manifestPath = path.join(tempExtractPath, 'manifest.json');
+
+  if (await fs.pathExists(manifestPath)) {
+    // Direct content: create folder and move content into it
+    const folderName = await generateUniquePackFolderName(targetDir, baseName, '');
+    const newFolderPath = path.join(tempExtractPath, folderName);
+    await fs.ensureDir(newFolderPath);
+
+    // Move all items to new folder
+    for (const item of extractedItems) {
+      const src = path.join(tempExtractPath, item);
+      const dest = path.join(newFolderPath, item);
+      await fs.move(src, dest);
+    }
+
+    // Copy the new folder to targetDir
+    await fs.copy(newFolderPath, path.join(targetDir, folderName), { overwrite: true });
+  } else {
+    // Assume folders: rename each folder
+    for (const item of extractedItems) {
+      const itemPath = path.join(tempExtractPath, item);
+      const stats = await fs.stat(itemPath);
+      if (stats.isDirectory()) {
+        const folderName = await generateUniquePackFolderName(targetDir, baseName, '');
+        const destPath = path.join(targetDir, folderName);
+        await fs.copy(itemPath, destPath, { overwrite: true });
+      }
+    }
+  }
+
+  await fs.remove(tempExtractPath);
+}
+
+// Helper: Process mcworld or mctemplate file extraction
+async function processMcWorld(filePath, originalName, targetDir) {
+  const ext = path.extname(originalName).toLowerCase();
+  const worldName = path.basename(originalName, ext);
+  const extractPath = path.join(targetDir, worldName);
+  const zip = new AdmZip(filePath);
+  zip.extractAllTo(extractPath, true);
+}
+
 app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (req, res) => {
   res.setHeader('X-Max-Upload-Size', '500MB');
   res.setHeader('Accept-Ranges', 'bytes');
@@ -2756,119 +2902,13 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
       progress: 25
     });
 
+    // Process based on file type
     if (ext === '.mcaddon') {
-      const tempExtractPath = path.join('./temp', `extract-${Date.now()}`);
-      await fs.ensureDir(tempExtractPath);
-
-      const zip = new AdmZip(req.file.path);
-      zip.extractAllTo(tempExtractPath, true);
-
-      io.emit('upload-progress', {
-        serverId,
-        status: 'processing',
-        filename: originalName,
-        progress: 50
-      });
-
-      const extractedItems = await fs.readdir(tempExtractPath);
-      let processedItems = 0;
-
-      // Generate base name for this mcaddon file (without suffix)
-      const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/^(_+)|(_+)$/g, '');
-      const addonBaseName = baseName || 'unknown_addon';
-
-      for (const item of extractedItems) {
-        const itemPath = path.join(tempExtractPath, item);
-        const stats = await fs.stat(itemPath);
-
-        if (stats.isDirectory()) {
-          if (item === 'behavior_packs' || item === 'behavior_pack') {
-            const behaviorItems = await fs.readdir(itemPath);
-            for (const pack of behaviorItems) {
-              const sourcePath = path.join(itemPath, pack);
-              const folderName = await generateUniquePackFolderName(paths.behaviorPacks, addonBaseName, '');
-              const destPath = path.join(paths.behaviorPacks, folderName);
-              await fs.copy(sourcePath, destPath, { overwrite: true });
-              processedItems++;
-            }
-          } else if (item === 'resource_packs' || item === 'resource_pack') {
-            const resourceItems = await fs.readdir(itemPath);
-            for (const pack of resourceItems) {
-              const sourcePath = path.join(itemPath, pack);
-              const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
-              const destPath = path.join(paths.resourcePacks, folderName);
-              await fs.copy(sourcePath, destPath, { overwrite: true });
-              processedItems++;
-            }
-          } else {
-            const manifestPath = path.join(itemPath, 'manifest.json');
-            if (await fs.pathExists(manifestPath)) {
-              try {
-                const manifest = await parseManifestJson(manifestPath);
-                const modules = manifest.modules || [];
-                const isBehavior = modules.some(m => m.type === 'data' || m.type === 'javascript' || m.type === 'script');
-                const targetPath = isBehavior ? paths.behaviorPacks : paths.resourcePacks;
-                const folderName = await generateUniquePackFolderName(targetPath, addonBaseName, '');
-                const destPath = path.join(targetPath, folderName);
-                await fs.copy(itemPath, destPath, { overwrite: true });
-                processedItems++;
-              } catch (err) {
-                const folderName = await generateUniquePackFolderName(paths.resourcePacks, addonBaseName, '');
-                const destPath = path.join(paths.resourcePacks, folderName);
-                await fs.copy(itemPath, destPath, { overwrite: true });
-                processedItems++;
-              }
-            }
-          }
-        }
-      }
-
-      await fs.remove(tempExtractPath);
+      await processMcAddon(req.file.path, originalName, paths, serverId, io);
     } else if (ext === '.mcpack') {
-      const baseName = path.basename(originalName, ext);
-      const tempExtractPath = path.join('./temp', `extract-${Date.now()}`);
-      await fs.ensureDir(tempExtractPath);
-
-      const zip = new AdmZip(req.file.path);
-      zip.extractAllTo(tempExtractPath, true);
-
-      const extractedItems = await fs.readdir(tempExtractPath);
-      const manifestPath = path.join(tempExtractPath, 'manifest.json');
-
-      if (await fs.pathExists(manifestPath)) {
-        // Direct content: create folder and move content into it
-        const folderName = await generateUniquePackFolderName(targetDir, baseName, '');
-        const newFolderPath = path.join(tempExtractPath, folderName);
-        await fs.ensureDir(newFolderPath);
-
-        // Move all items to new folder
-        for (const item of extractedItems) {
-          const src = path.join(tempExtractPath, item);
-          const dest = path.join(newFolderPath, item);
-          await fs.move(src, dest);
-        }
-
-        // Copy the new folder to targetDir
-        await fs.copy(newFolderPath, path.join(targetDir, folderName), { overwrite: true });
-      } else {
-        // Assume folders: rename each folder
-        for (const item of extractedItems) {
-          const itemPath = path.join(tempExtractPath, item);
-          const stats = await fs.stat(itemPath);
-          if (stats.isDirectory()) {
-            const folderName = await generateUniquePackFolderName(targetDir, baseName, '');
-            const destPath = path.join(targetDir, folderName);
-            await fs.copy(itemPath, destPath, { overwrite: true });
-          }
-        }
-      }
-
-      await fs.remove(tempExtractPath);
+      await processMcPack(req.file.path, originalName, targetDir);
     } else if (ext === '.mcworld' || ext === '.mctemplate') {
-      const worldName = path.basename(originalName, ext);
-      const extractPath = path.join(targetDir, worldName);
-      const zip = new AdmZip(req.file.path);
-      zip.extractAllTo(extractPath, true);
+      await processMcWorld(req.file.path, originalName, targetDir);
     }
 
     io.emit('upload-progress', {
@@ -2923,6 +2963,57 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
   }
 });
 
+// Helper: Toggle addon pack (behavior or resource)
+async function toggleAddonPack(packPath, worldPath, configFileName) {
+  if (!await fs.pathExists(packPath)) {
+    return { toggled: false, enabled: false };
+  }
+
+  const manifestPath = path.join(packPath, 'manifest.json');
+  if (!await fs.pathExists(manifestPath)) {
+    return { toggled: false, enabled: false };
+  }
+
+  let manifest;
+  try {
+    manifest = await parseManifestJson(manifestPath);
+  } catch (err) {
+    console.warn(`Failed to parse manifest at ${manifestPath}:`, err.message);
+    return { toggled: false, enabled: false };
+  }
+
+  if (!manifest?.header?.uuid) {
+    return { toggled: false, enabled: false };
+  }
+
+  const uuid = manifest.header.uuid;
+  const version = manifest.header.version;
+  const configFile = path.join(worldPath, configFileName);
+  
+  let packs = [];
+  if (await fs.pathExists(configFile)) {
+    packs = await fs.readJson(configFile);
+  }
+
+  const packIndex = packs.findIndex(p => p.pack_id === uuid);
+  const enabled = packIndex < 0; // Will be enabled if not currently in list
+
+  if (packIndex >= 0) {
+    // Disable - remove from list
+    packs.splice(packIndex, 1);
+  } else {
+    // Enable - add to list
+    packs.push({
+      pack_id: uuid,
+      version: version
+    });
+  }
+
+  // Save config
+  await fs.writeJson(configFile, packs, { spaces: 2 });
+  return { toggled: true, enabled };
+}
+
 // POST /api/servers/:id/addons/:name/toggle - Enable/disable addon
 app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
   try {
@@ -2934,102 +3025,23 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
     const worldPath = path.join(paths.worlds, worldName);
     await fs.ensureDir(worldPath);
 
-    let toggledBehavior = false;
-    let toggledResource = false;
-    let behaviorEnabled = false;
-    let resourceEnabled = false;
-
     // Handle behavior pack if it exists
     const behaviorPackPath = path.join(paths.behaviorPacks, name);
-    if (await fs.pathExists(behaviorPackPath)) {
-      const manifestPath = path.join(behaviorPackPath, 'manifest.json');
-      if (await fs.pathExists(manifestPath)) {
-        let manifest;
-        try {
-          manifest = await parseManifestJson(manifestPath);
-        } catch (err) {
-          console.warn(`Failed to parse manifest for behavior pack ${name}:`, err.message);
-          // Continue without manifest data
-        }
-
-        if (manifest?.header?.uuid) {
-          const uuid = manifest.header.uuid;
-          const version = manifest.header.version;
-
-          const configFile = path.join(worldPath, 'world_behavior_packs.json');
-          let packs = [];
-          if (await fs.pathExists(configFile)) {
-            packs = await fs.readJson(configFile);
-          }
-
-          const packIndex = packs.findIndex(p => p.pack_id === uuid);
-
-          if (packIndex >= 0) {
-            // Disable - remove from list
-            packs.splice(packIndex, 1);
-            behaviorEnabled = false;
-          } else {
-            // Enable - add to list
-            packs.push({
-              pack_id: uuid,
-              version: version
-            });
-            behaviorEnabled = true;
-          }
-
-          // Save config
-          await fs.writeJson(configFile, packs, { spaces: 2 });
-          toggledBehavior = true;
-        }
-      }
-    }
+    const behaviorResult = await toggleAddonPack(
+      behaviorPackPath, 
+      worldPath, 
+      'world_behavior_packs.json'
+    );
 
     // Handle resource pack if it exists
     const resourcePackPath = path.join(paths.resourcePacks, name);
-    if (await fs.pathExists(resourcePackPath)) {
-      const manifestPath = path.join(resourcePackPath, 'manifest.json');
-      if (await fs.pathExists(manifestPath)) {
-        let manifest;
-        try {
-          manifest = await parseManifestJson(manifestPath);
-        } catch (err) {
-          console.warn(`Failed to parse manifest for resource pack ${name}:`, err.message);
-          // Continue without manifest data
-        }
+    const resourceResult = await toggleAddonPack(
+      resourcePackPath, 
+      worldPath, 
+      'world_resource_packs.json'
+    );
 
-        if (manifest?.header?.uuid) {
-          const uuid = manifest.header.uuid;
-          const version = manifest.header.version;
-
-          const configFile = path.join(worldPath, 'world_resource_packs.json');
-          let packs = [];
-          if (await fs.pathExists(configFile)) {
-            packs = await fs.readJson(configFile);
-          }
-
-          const packIndex = packs.findIndex(p => p.pack_id === uuid);
-
-          if (packIndex >= 0) {
-            // Disable - remove from list
-            packs.splice(packIndex, 1);
-            resourceEnabled = false;
-          } else {
-            // Enable - add to list
-            packs.push({
-              pack_id: uuid,
-              version: version
-            });
-            resourceEnabled = true;
-          }
-
-          // Save config
-          await fs.writeJson(configFile, packs, { spaces: 2 });
-          toggledResource = true;
-        }
-      }
-    }
-
-    if (!toggledBehavior && !toggledResource) {
+    if (!behaviorResult.toggled && !resourceResult.toggled) {
       return res.status(404).json({ error: 'Addon not found' });
     }
 
@@ -3037,18 +3049,18 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
     setTimeout(() => broadcastServerDetails(req.params.id), 500);
 
     let message = '';
-    if (toggledBehavior && toggledResource) {
-      message = behaviorEnabled || resourceEnabled ? 'Addon enabled' : 'Addon disabled';
-    } else if (toggledBehavior) {
-      message = behaviorEnabled ? 'Behavior pack enabled' : 'Behavior pack disabled';
-    } else if (toggledResource) {
-      message = resourceEnabled ? 'Resource pack enabled' : 'Resource pack disabled';
+    if (behaviorResult.toggled && resourceResult.toggled) {
+      message = behaviorResult.enabled || resourceResult.enabled ? 'Addon enabled' : 'Addon disabled';
+    } else if (behaviorResult.toggled) {
+      message = behaviorResult.enabled ? 'Behavior pack enabled' : 'Behavior pack disabled';
+    } else if (resourceResult.toggled) {
+      message = resourceResult.enabled ? 'Resource pack enabled' : 'Resource pack disabled';
     }
 
     res.json({
       message: message,
-      behaviorEnabled: behaviorEnabled,
-      resourceEnabled: resourceEnabled
+      behaviorEnabled: behaviorResult.enabled,
+      resourceEnabled: resourceResult.enabled
     });
   } catch (err) {
     console.error('Error toggling addon:', err);
@@ -3361,6 +3373,117 @@ async function broadcastServerUpdate(serverId = null) {
   debouncedBroadcastServerUpdate(serverId);
 }
 
+// Helper: Extract player names from server logs
+function extractPlayerNamesFromLogs(lines) {
+  const players_temp = [];
+  let lastIndex = -1;
+  
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('players online:')) {
+      lastIndex = i;
+    }
+  }
+
+  if (lastIndex >= 0) {
+    for (let i = lastIndex + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
+        break;
+      }
+      if (line) {
+        const names = line.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
+        players_temp.push(...names.map(name => ({ name })));
+      }
+    }
+  }
+  
+  return players_temp;
+}
+
+// Helper: Load and update player cache with XUIDs
+async function loadAndUpdatePlayerCache(serverId, players) {
+  const cachePath = path.join(getServerPath(serverId), 'player_cache.json');
+  let playerCache = {};
+  
+  try {
+    if (await fs.pathExists(cachePath)) {
+      const cacheContent = await fs.readFile(cachePath, 'utf8');
+      playerCache = JSON.parse(cacheContent);
+    }
+  } catch (err) {
+    console.warn(`Failed to read player cache:`, err.message);
+  }
+
+  const uncachedPlayers = players.filter(p => !playerCache[p.name]);
+
+  if (uncachedPlayers.length > 0) {
+    const xuidResults = await fetchXuidsBatch(uncachedPlayers);
+
+    for (const result of xuidResults) {
+      playerCache[result.name] = result.xuid;
+    }
+
+    try {
+      await fs.writeJson(cachePath, playerCache, { spaces: 2 });
+    } catch (err) {
+      console.warn(`Failed to write player cache:`, err.message);
+    }
+  }
+
+  // Apply cached XUIDs to players
+  players.forEach(player => {
+    if (playerCache[player.name]) {
+      player.xuid = playerCache[player.name];
+    }
+  });
+  
+  return players;
+}
+
+// Helper: Load permissions and mark operators
+async function markOperators(serverId, players) {
+  let permissions = [];
+  try {
+    const permissionsPath = path.join(getServerPath(serverId), 'permissions.json');
+    if (await fs.pathExists(permissionsPath)) {
+      const permissionsContent = await fs.readFile(permissionsPath, 'utf8');
+      permissions = JSON.parse(permissionsContent);
+    }
+  } catch (err) {
+    console.warn(`Failed to read permissions:`, err.message);
+  }
+
+  const operatorXuids = new Set(permissions.filter(p => p.permission === 'operator').map(p => p.xuid));
+  players.forEach(player => {
+    player.isOperator = player.xuid && operatorXuids.has(player.xuid);
+  });
+  
+  return players;
+}
+
+// Helper: Load server configuration
+async function loadServerConfig(serverId) {
+  let config = {};
+  try {
+    const serverPath = getServerPath(serverId);
+    const configPath = path.join(serverPath, 'server.properties');
+    if (await fs.pathExists(configPath)) {
+      const content = await fs.readFile(configPath, 'utf8');
+      content.split('\n').forEach(line => {
+        if (line.trim() && !line.startsWith('#')) {
+          const [key, value] = line.split('=');
+          if (key && value !== undefined) {
+            config[key.trim()] = value.trim();
+          }
+        }
+      });
+    }
+  } catch (err) {
+    console.warn(`Failed to read server config:`, err.message);
+  }
+  return config;
+}
+
 // Helper function to broadcast server details with timeout
 async function broadcastServerDetails(serverId) {
   try {
@@ -3394,102 +3517,22 @@ async function broadcastServerDetails(serverId) {
               tail: 15
             });
           } catch (err) {
+            console.warn('Failed to get container logs:', err.message);
             return;
           }
 
           const lines = demuxDockerStream(logs);
-          const players_temp = [];
-
-          let lastIndex = -1;
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes('players online:')) {
-              lastIndex = i;
-            }
+          let players_temp = extractPlayerNamesFromLogs(lines);
+          
+          if (players_temp.length > 0) {
+            players_temp = await loadAndUpdatePlayerCache(serverId, players_temp);
+            players_temp = await markOperators(serverId, players_temp);
           }
-
-          if (lastIndex >= 0) {
-            for (let i = lastIndex + 1; i < lines.length; i++) {
-              const line = lines[i].trim();
-              if (line.startsWith('[') || line.startsWith('>') || line.includes('AutoCompaction') || line === '') {
-                break;
-              }
-              if (line) {
-                const names = line.split(',').map(n => n.replaceAll(/[^\x20-\x7E]/g, '').replaceAll('"', '').trim()).filter(Boolean);
-                players_temp.push(...names.map(name => ({ name })));
-              }
-            }
-          }
-
-          let playerCache = {};
-          const cachePath = path.join(getServerPath(serverId), 'player_cache.json');
-          try {
-            if (await fs.pathExists(cachePath)) {
-              const cacheContent = await fs.readFile(cachePath, 'utf8');
-              playerCache = JSON.parse(cacheContent);
-            }
-          } catch (err) {
-            console.error(`Failed to read player cache:`, err.message);
-          }
-
-          const uncachedPlayers = players_temp.filter(p => !playerCache[p.name]);
-
-          if (uncachedPlayers.length > 0) {
-            const xuidResults = await fetchXuidsBatch(uncachedPlayers);
-
-            for (const result of xuidResults) {
-              playerCache[result.name] = result.xuid;
-            }
-
-            try {
-              await fs.writeJson(cachePath, playerCache, { spaces: 2 });
-            } catch (err) {
-              console.error(`Failed to write player cache:`, err.message);
-            }
-          }
-
-          players_temp.forEach(player => {
-            if (playerCache[player.name]) {
-              player.xuid = playerCache[player.name];
-            }
-          });
-
-          let permissions = [];
-          try {
-            const permissionsPath = path.join(getServerPath(serverId), 'permissions.json');
-            if (await fs.pathExists(permissionsPath)) {
-              const permissionsContent = await fs.readFile(permissionsPath, 'utf8');
-              permissions = JSON.parse(permissionsContent);
-            }
-          } catch (err) {
-            console.error(`Failed to read permissions:`, err.message);
-          }
-
-          const operatorXuids = new Set(permissions.filter(p => p.permission === 'operator').map(p => p.xuid));
-          players_temp.forEach(player => {
-            player.isOperator = player.xuid && operatorXuids.has(player.xuid);
-          });
-
+          
           players = players_temp;
         }
 
-        let config = {};
-        try {
-          const serverPath = getServerPath(serverId);
-          const configPath = path.join(serverPath, 'server.properties');
-          if (await fs.pathExists(configPath)) {
-            const content = await fs.readFile(configPath, 'utf8');
-            content.split('\n').forEach(line => {
-              if (line.trim() && !line.startsWith('#')) {
-                const [key, value] = line.split('=');
-                if (key && value !== undefined) {
-                  config[key.trim()] = value.trim();
-                }
-              }
-            });
-          }
-        } catch (err) {
-          console.error(`Failed to read server config:`, err.message);
-        }
+        const config = await loadServerConfig(serverId);
 
         io.emit('server-details-update', {
           serverId,
