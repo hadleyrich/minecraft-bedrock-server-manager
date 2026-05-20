@@ -12,7 +12,7 @@
     "copy-assets": "node scripts/copy-assets.js"
   },
   "dependencies": {
-    "@tailwindcss/cli": "^4.1.18",
+    "@tailwindcss/cli": "^4.3.0",
     "adm-zip": "^0.5.10",
     "archiver": "^7.0.1",
     "cors": "^2.8.5",
