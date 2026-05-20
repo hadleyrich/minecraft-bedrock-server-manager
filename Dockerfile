@@ -1,4 +1,4 @@
-FROM node:24-alpine
+FROM node:26-alpine
 
 LABEL maintainer="Minecraft Bedrock Server Manager"
 LABEL description="Web-based manager for Docker-based Minecraft Bedrock servers"
