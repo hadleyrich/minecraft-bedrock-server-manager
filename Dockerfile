@@ -1,3 +1,19 @@
+# Stage 1: Builder - install all deps and build assets
+FROM node:26-alpine AS builder
+
+WORKDIR /app
+
+ENV NPM_CONFIG_LOGLEVEL=warn
+
+# Install ALL dependencies (including build-time tools like tailwind)
+COPY --chown=node:node package*.json ./
+RUN npm ci
+
+# Copy source and build assets (css, index.html, sweetalert2, socket.io client)
+COPY --chown=node:node . .
+RUN npm run build:assets
+
+# Stage 2: Runtime - production deps only
 FROM node:26-alpine
 
 LABEL maintainer="Minecraft Bedrock Server Manager"
@@ -14,15 +30,16 @@ ENV NODE_ENV=production \
     DATA_DIR=/app/minecraft-data \
     NPM_CONFIG_LOGLEVEL=warn
 
+# Install only production dependencies
 COPY --chown=node:node package*.json ./
-
-RUN npm ci && \
+RUN npm ci --omit=dev && \
     npm cache clean --force
 
-COPY --chown=node:node . .
+# Copy application code and built assets from builder
+COPY --from=builder --chown=node:node /app/server.js ./
+COPY --from=builder --chown=node:node /app/public ./public
 
-RUN npm run build:assets && \
-    mkdir -p temp/addon-uploads temp/uploads minecraft-data && \
+RUN mkdir -p temp/addon-uploads temp/uploads minecraft-data && \
     chown -R node:node temp minecraft-data
 
 COPY --chown=root:root docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
