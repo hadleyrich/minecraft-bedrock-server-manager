@@ -24,7 +24,7 @@
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.3.0",
+    "@tailwindcss/cli": "^4.3.3",
     "nodemon": "^3.1.14",
     "socket.io-client": "^4.8.3",
     "sweetalert2": "^11.26.24",
