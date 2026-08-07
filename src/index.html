@@ -423,6 +423,24 @@
             class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg"
           />
         </div>
+        <div class="mb-3">
+          <label
+            for="importPort"
+            class="block text-sm text-gray-400 mb-2"
+            >Game Port (Optional)</label
+          >
+          <input
+            type="number"
+            id="importPort"
+            min="1"
+            max="65535"
+            placeholder="e.g. 19132"
+            class="w-full px-3 py-1.5 text-sm bg-gray-900 border border-gray-700 rounded-lg"
+          />
+          <p class="text-xs text-gray-500 mt-1">
+            Leave empty to auto-assign the first available port
+          </p>
+        </div>
         <div class="text-xs text-gray-500 mb-3">
           <p>
             💡 Import an existing itzg/minecraft-bedrock-server container to
@@ -1343,6 +1361,11 @@
                             <input id="swal-docker-network" type="text" placeholder="e.g. minecraft-network" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500 text-white text-sm">
                             <p class="text-xs text-gray-400 mt-1">Leave empty to use default Docker network</p>
                         </div>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-400 mb-2">Game Port (Optional)</label>
+                            <input id="swal-game-port" type="number" min="1" max="65535" placeholder="e.g. 19132" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-green-500 text-white text-sm">
+                            <p class="text-xs text-gray-400 mt-1">Leave empty to auto-assign the first available port</p>
+                        </div>
                     </div>
                 `,
           showCancelButton: true,
@@ -1375,6 +1398,9 @@
             const network = document
               .getElementById("swal-docker-network")
               .value.trim();
+            const port = document
+              .getElementById("swal-game-port")
+              .value.trim();
             let version;
 
             if (versionType === "CUSTOM") {
@@ -1393,20 +1419,37 @@
               Swal.showValidationMessage("Server name is required!");
               return false;
             }
-            return { name, version, network: network || null };
+
+            if (port && (parseInt(port, 10) < 1 || parseInt(port, 10) > 65535)) {
+              Swal.showValidationMessage("Port must be between 1 and 65535");
+              return false;
+            }
+
+            return { name, version, network: network || null, port: port || null };
           },
         });
 
         if (!formValues) return;
-        const { name, version, network } = formValues;
+        const { name, version, network, port } = formValues;
 
         try {
           showLoading();
-          await fetch(`${API_BASE}/servers`, {
+          const response = await fetch(`${API_BASE}/servers`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, version, network }),
+            body: JSON.stringify({ name, version, network, port }),
           });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            hideLoading();
+            Swal.fire({
+              title: "Error",
+              text: "Failed to create server: " + (result.error || response.statusText),
+              icon: "error",
+              confirmButtonColor: "#10b981",
+            });
+            return;
+          }
           await fetchServers();
           hideLoading();
         } catch (err) {
@@ -2762,7 +2805,7 @@
                                 }">
                                 <div class="flex items-center justify-between">
                                     <div>
-                                        <div class="font-medium truncate">${server.name}</div>
+                                        <div class="font-medium truncate">${server.name}${server.managed === false ? ' <span class="text-amber-400 text-xs">(unmanaged)</span>' : ""}</div>
                                         ${server.status === "running" ? (server.containerIP ? `<div class="text-xs text-white-400">IP: ${server.containerIP}:19132</div>` : `<div class="text-xs text-white-400">Port: ${server.ports?.find((p) => p.PrivatePort === 19132)?.PublicPort || "19132"}</div>`) : ""}
                                     </div>
                                     <span class="status-dot ${server.status === "running" ? "bg-green-500" : "bg-red-500"}"></span>
@@ -2851,7 +2894,7 @@
                                     }">
                                     <div class="flex items-center justify-between">
                                         <div>
-                                            <div class="font-medium truncate">${server.name}</div>
+                                            <div class="font-medium truncate">${server.name}${server.managed === false ? ' <span class="text-amber-400 text-xs">(unmanaged)</span>' : ""}</div>
                                             ${server.status === "running" ? (server.containerIP ? `<div class="text-xs text-white-400">IP: ${server.containerIP}:19132</div>` : `<div class="text-xs text-white-400">Port: ${server.ports?.find((p) => p.PrivatePort === 19132)?.PublicPort || "19132"}</div>`) : ""}
                                         </div>
                                         <span class="status-dot ${server.status === "running" ? "bg-green-500" : "bg-red-500"}"></span>
@@ -2869,8 +2912,24 @@
                     <!-- Main Content -->
                     <div class="flex-1 flex flex-col overflow-hidden">
                         ${
-                          currentServer
+                          currentServer && currentServer.managed === false
                             ? `
+                            <!-- Unmanaged Server Notice -->
+                            <div class="bg-gray-800 border-b border-gray-700 px-4 py-2.5">
+                                <div class="flex items-center gap-2">
+                                    <h2 class="text-base md:text-lg font-bold truncate">${currentServer.name}</h2>
+                                    <span class="px-2 py-0.5 text-xs bg-amber-600 rounded-lg">Unmanaged</span>
+                                </div>
+                                <div class="text-xs text-gray-400 mt-0.5 truncate">
+                                    ${currentServer.status} — not managed by this application
+                                </div>
+                            </div>
+                            <div id="mainContent" class="flex-1 overflow-y-auto p-4">
+                                ${renderTabContent(currentServer)}
+                            </div>
+                        `
+                            : currentServer
+                              ? `
                             <!-- Server Controls -->
                             <div class="bg-gray-800 border-b border-gray-700 px-4 py-2.5">
                                 <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
@@ -3026,6 +3085,25 @@
       }
 
       function renderTabContent(server) {
+        if (server && server.managed === false) {
+          return `
+                    <div class="flex flex-col items-center justify-center min-h-[60vh] p-6 text-center">
+                        <div class="text-64 mb-4">📥</div>
+                        <h2 class="text-xl font-bold mb-2">Unmanaged Server Detected</h2>
+                        <p class="text-gray-400 max-w-md mb-6">
+                            This container is running a Bedrock server but is not currently managed by this application (it's located outside the configured data directory).
+                        </p>
+                        <button onclick="importUnmanagedServer('${server.containerName}')" class="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg transition">
+                            Import this Container
+                        </button>
+                        <div class="mt-8 text-sm text-gray-500 text-left bg-gray-800 p-4 rounded-lg w-full max-w-md">
+                            <div class="font-bold mb-1">Details:</div>
+                            <div>ID: ${server.id}</div>
+                            <div>Image: ${server.image || 'itzg/minecraft-bedrock-server'}</div>
+                        </div>
+                    </div>
+                `;
+        }
         switch (state.activeTab) {
           case "dashboard":
             return `
@@ -3831,6 +3909,14 @@
 
       function showImportModal() {
         document.getElementById("importContainerName").value = "";
+        document.getElementById("importPort").value = "";
+        openModal("importModal");
+      }
+
+      // Pre-fill import modal for an unmanaged server and open it
+      function importUnmanagedServer(name) {
+        document.getElementById("importContainerName").value = name;
+        document.getElementById("importPort").value = "";
         openModal("importModal");
       }
 
@@ -3848,12 +3934,23 @@
           return;
         }
 
+        const port = document.getElementById("importPort").value.trim();
+        if (port && (parseInt(port, 10) < 1 || parseInt(port, 10) > 65535)) {
+          Swal.fire({
+            title: "Invalid Port",
+            text: "Port must be between 1 and 65535",
+            icon: "warning",
+            confirmButtonColor: "#10b981",
+          });
+          return;
+        }
+
         try {
           showLoading();
           const response = await fetch(`${API_BASE}/servers/import`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ containerName }),
+            body: JSON.stringify({ containerName, port: port || null }),
           });
 
           const result = await response.json();

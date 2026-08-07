@@ -9,6 +9,7 @@ const path = require('node:path');
 const archiver = require('archiver');
 const AdmZip = require('adm-zip');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 const { createServer } = require('node:http');
 const { Server } = require('socket.io');
 
@@ -242,7 +243,7 @@ async function getCachedServerInfo(serverId) {
   const serverData = {
     id: serverId,
     name: metadata.name || info.Name.replace('/', ''),
-    containerName: metadata.containerName || serverId,
+    containerName: metadata.containerName || info.Name.replace('/', '') || serverId,
     version: metadata.version || 'LATEST',
     network: metadata.network || null,
     status: info.State.Status,
@@ -254,7 +255,8 @@ async function getCachedServerInfo(serverId) {
     worldSize: worldSize,
     ports: ports,
     containerIP: containerIP,
-    webPort: PORT
+    webPort: PORT,
+    image: info.Config && info.Config.Image || null
   };
 
   // Only cache if IP is present for macvlan, or always cache for other network types
@@ -442,7 +444,7 @@ function buildContainerEnv(metadata, overrides = {}) {
 }
 
 // Helper: Get server data path
-const getServerPath = (serverId) => path.join(DATA_DIR, serverId);
+const getServerPath = (serverId) => path.join(DATA_DIR, path.basename(serverId));
 
 // Helper: Check if a network requires port mapping by inspecting its driver
 const networkRequiresPortMapping = async (networkName) => {
@@ -454,7 +456,7 @@ const networkRequiresPortMapping = async (networkName) => {
     // macvlan and ipvlan drivers don't need port mapping
     return driver !== 'macvlan' && driver !== 'ipvlan';
   } catch (err) {
-    console.warn(`Failed to inspect network ${networkName}:`, err.message);
+    console.warn('Failed to inspect network:', networkName, err.message);
     return true; // Default to port mapping on error
   }
 };
@@ -560,26 +562,41 @@ const getHostDataPath = async () => {
   }
 };
 
-// Helper: Get container by server ID
+// Helper: Get container by server ID (label, full/partial ID, or name)
 const getContainer = async (serverId) => {
   const containers = await docker.listContainers({ all: true });
-  const container = containers.find(c => c.Labels['server-id'] === serverId);
+  const container = containers.find(c =>
+    (c.Labels && c.Labels['server-id'] === serverId) ||
+    c.Id === serverId ||
+    c.Id.startsWith(serverId) ||
+    (c.Names && c.Names.includes(`/${serverId}`))
+  );
   return container ? docker.getContainer(container.Id) : null;
 };
 
 
+// Helper: List all bedrock servers (managed + unmanaged), enriched with managed flag
+async function listAllServers() {
+  const containers = await docker.listContainers({ all: true });
+  const bedrockServers = containers.filter(c =>
+    (c.Image || '').includes(BEDROCK_IMAGE) ||
+    (c.Labels && c.Labels['server-id'])
+  );
+
+  const servers = await Promise.all(bedrockServers.map(async (c) => {
+    const managed = !!(c.Labels && c.Labels['server-id']);
+    const id = (c.Labels && c.Labels['server-id']) || c.Id;
+    const info = await getCachedServerInfo(id);
+    return info ? { ...info, managed } : null;
+  }));
+
+  return servers.filter(s => s !== null);
+}
+
 // GET /api/servers - List all servers
 app.get('/api/servers', async (req, res) => {
   try {
-    const containers = await docker.listContainers({ all: true });
-    const bedrockServers = containers.filter(c =>
-      c.Image.includes(BEDROCK_IMAGE) && c.Labels['server-id']
-    );
-
-    const serverIds = bedrockServers.map(c => c.Labels['server-id']);
-    const servers = await Promise.all(serverIds.map(serverId => getCachedServerInfo(serverId)));
-
-    res.json(servers.filter(s => s !== null));
+    res.json(await listAllServers());
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -663,9 +680,18 @@ app.get('/api/servers/orphaned', async (req, res) => {
 // POST /api/servers/import - Import existing server
 app.post('/api/servers/import', async (req, res) => {
   try {
-    const { containerName } = req.body;
+    const { containerName, port } = req.body;
     if (!containerName?.trim()) {
       return res.status(400).json({ error: 'Container name is required' });
+    }
+
+    // Validate optional port (range check only; availability is checked after the original container is stopped)
+    let requestedPort = null;
+    if (port !== undefined && port !== null && port !== '') {
+      requestedPort = parseInt(port, 10);
+      if (isNaN(requestedPort) || requestedPort < 1 || requestedPort > 65535) {
+        return res.status(400).json({ error: 'Invalid port number. Must be between 1 and 65535.' });
+      }
     }
 
     const trimmedName = containerName.trim();
@@ -686,6 +712,15 @@ app.post('/api/servers/import', async (req, res) => {
     // Inspect the container
     const container = docker.getContainer(containerInfo.Id);
     const details = await container.inspect();
+
+    // Check port availability (before mutating anything) — skip if it's the source container's own port
+    if (requestedPort) {
+      const sourcePort = details.NetworkSettings?.Ports?.['19132/udp']?.[0]?.HostPort;
+      const sourcePortNum = sourcePort ? parseInt(sourcePort, 10) : null;
+      if (requestedPort !== sourcePortNum && !(await isPortAvailable(requestedPort))) {
+        return res.status(400).json({ error: `Port ${requestedPort} is already in use` });
+      }
+    }
 
     // Find the data mount
     const dataMount = details.Mounts?.find(m => m.Destination === '/data');
@@ -728,7 +763,7 @@ app.post('/api/servers/import', async (req, res) => {
         console.log(`Stopped container: ${trimmedName}`);
       }
     } catch (error_) {
-      console.warn(`Failed to stop container ${trimmedName}:`, error_.message);
+      console.warn('Failed to stop container:', trimmedName, error_.message);
       // Continue anyway
     }
 
@@ -745,6 +780,7 @@ app.post('/api/servers/import', async (req, res) => {
     metadata.name = serverName;
     metadata.version = serverVersion;
     metadata.memory = details.HostConfig.Memory || 2 * 1024 * 1024 * 1024; // default 2GB
+    metadata.port = requestedPort; // may be null for auto-assign
     metadata.createdAt = new Date().toISOString();
     metadata.updatedAt = new Date().toISOString();
     metadata.importedFrom = trimmedName;
@@ -786,20 +822,22 @@ app.post('/api/servers/import', async (req, res) => {
     };
 
     const networkName = getNetworkName(metadata);
-    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName);
+    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName, requestedPort);
 
     const newContainer = await docker.createContainer(containerConfig);
 
     // Start the new container
     await newContainer.start();
 
-    // Update metadata with actual container name
+    // Update metadata with actual container name and assigned port
     const newContainerInfo = await newContainer.inspect();
     const actualContainerName = newContainerInfo.Name ? newContainerInfo.Name.replace('/', '') : serverId;
     const metadataPath3 = path.join(serverPath, 'metadata.json');
     if (await fs.pathExists(metadataPath3)) {
       const metadata = await fs.readJson(metadataPath3);
       metadata.containerName = actualContainerName;
+      // Persist the actual assigned port so future recreates keep it
+      if (gamePort) metadata.port = gamePort;
       metadata.updatedAt = new Date().toISOString();
       await fs.writeJson(metadataPath3, metadata, { spaces: 2 });
     }
@@ -825,11 +863,23 @@ app.post('/api/servers/import', async (req, res) => {
 // POST /api/servers - Create new server
 app.post('/api/servers', async (req, res) => {
   try {
-    const { name, version = 'LATEST', network } = req.body;
+    const { name, version = 'LATEST', network, port } = req.body;
 
     // Validate inputs
     if (!validateServerName(name)) {
       return res.status(400).json({ error: 'Invalid server name. Must be 1-100 characters and not contain special characters.' });
+    }
+
+    // Validate optional port
+    let requestedPort = null;
+    if (port !== undefined && port !== null && port !== '') {
+      requestedPort = parseInt(port, 10);
+      if (isNaN(requestedPort) || requestedPort < 1 || requestedPort > 65535) {
+        return res.status(400).json({ error: 'Invalid port number. Must be between 1 and 65535.' });
+      }
+      if (!(await isPortAvailable(requestedPort))) {
+        return res.status(400).json({ error: `Port ${requestedPort} is already in use` });
+      }
     }
 
     const serverId = `bedrock-${Date.now()}`;
@@ -847,6 +897,7 @@ app.post('/api/servers', async (req, res) => {
       version: version,
       memory: 2 * 1024 * 1024 * 1024, // 2GB default
       network: network || null,
+      port: requestedPort, // may be null for auto-assign
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -889,19 +940,21 @@ app.post('/api/servers', async (req, res) => {
 
     // Apply network and port configuration
     const networkName = getNetworkName(metadata);
-    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName);
+    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName, requestedPort);
 
     // Create and start container
     const container = await docker.createContainer(containerConfig);
     await container.start();
 
-    // Update metadata with actual container name
+    // Update metadata with actual container name and assigned port
     const containerInfo = await container.inspect();
     const actualContainerName = containerInfo.Name ? containerInfo.Name.replace('/', '') : serverId;
     const metadataPath2 = path.join(serverPath, 'metadata.json');
     if (await fs.pathExists(metadataPath2)) {
       const metadata = await fs.readJson(metadataPath2);
       metadata.containerName = actualContainerName;
+      // Persist the actual assigned port so future recreates keep it
+      if (gamePort) metadata.port = gamePort;
       metadata.updatedAt = new Date().toISOString();
       await fs.writeJson(metadataPath2, metadata, { spaces: 2 });
     }
@@ -1065,10 +1118,139 @@ app.post('/api/servers/:id/restart', async (req, res) => {
   }
 });
 
+// Helper: Recreate a server's Docker container from its stored metadata
+async function recreateServerContainer(serverId) {
+  if (!validateServerId(serverId)) {
+    throw new Error('Invalid server ID');
+  }
+
+  const serverPath = getServerPath(serverId);
+  const metadataPath = path.join(serverPath, 'metadata.json');
+
+  // Verify server directory exists
+  if (!await fs.pathExists(serverPath)) {
+    throw new Error('Server directory not found');
+  }
+
+  // Check if metadata exists
+  if (!await fs.pathExists(metadataPath)) {
+    throw new Error('Server metadata not found. Cannot recreate.');
+  }
+
+  // Read metadata
+  const metadata = await fs.readJson(metadataPath);
+
+  // Check if container already exists and destroy it first
+  let existingContainer = null;
+  try {
+    const containers = await docker.listContainers({ all: true });
+    const existing = containers.find(c => c.Labels['server-id'] === serverId);
+    existingContainer = existing;
+  } catch (err) {
+    console.error('Failed to check for existing container:', err.message);
+  }
+
+  if (existingContainer) {
+    try {
+      console.log(`Destroying existing container for ${serverId} before recreation...`);
+      const container = docker.getContainer(existingContainer.Id);
+
+      // Stop container if running
+      try {
+        const containerInfo = await container.inspect();
+        if (containerInfo.State.Running) {
+          await container.stop();
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      } catch (err) {
+        console.error('Failed to stop container:', serverId, err.message);
+      }
+
+      // Remove container
+      await container.remove({ force: true });
+      console.log(`Successfully destroyed existing container for ${serverId}`);
+    } catch (err) {
+      console.error(`Error destroying existing container: ${err.message}`);
+      throw new Error(`Failed to destroy existing container: ${err.message}`);
+    }
+  }
+
+  // Get host data path
+  const hostDataPath = await getHostDataPath();
+  const hostServerPath = path.join(hostDataPath, serverId);
+
+  // Pull the Docker image if not available
+  try {
+    await docker.getImage(BEDROCK_IMAGE).inspect();
+  } catch {
+    console.warn(`Image not found locally, pulling ${BEDROCK_IMAGE}...`);
+    const stream = await docker.pull(BEDROCK_IMAGE);
+    await new Promise((resolve, reject) => {
+      docker.modem.followProgress(stream, (err, output) => {
+        if (err) reject(err);
+        else resolve(output);
+      });
+    });
+    console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
+  }
+
+  // Build container config (matching original creation logic)
+  const containerConfig = {
+    Image: BEDROCK_IMAGE,
+    name: serverId,
+    User: '1000:1000',
+    Labels: {
+      'server-id': serverId,
+      'server-name': metadata.name || 'Bedrock Server'
+    },
+    Env: buildContainerEnv({ version: metadata.version, name: metadata.name }),
+    HostConfig: {
+      Binds: [`${hostServerPath}:/data`],
+      RestartPolicy: {
+        Name: 'unless-stopped'
+      },
+      Memory: metadata.memory || 2 * 1024 * 1024 * 1024
+    }
+  };
+
+  // Apply network and port configuration
+  const networkName = getNetworkName(metadata);
+  const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName, metadata.port || null);
+
+  // Create and start container
+  const container = await docker.createContainer(containerConfig);
+  await container.start();
+
+  // Update metadata with actual container name
+  const containerInfo = await container.inspect();
+  const actualContainerName = containerInfo.Name ? containerInfo.Name.replace('/', '') : serverId;
+  if (await fs.pathExists(metadataPath)) {
+    const updatedMetadata = await fs.readJson(metadataPath);
+    updatedMetadata.containerName = actualContainerName;
+    updatedMetadata.updatedAt = new Date().toISOString();
+    await fs.writeJson(metadataPath, updatedMetadata, { spaces: 2 });
+  }
+
+  // Invalidate cache and broadcast update
+  invalidateServerCache(serverId);
+  setTimeout(() => broadcastServerUpdate(serverId), 2000);
+
+  return {
+    id: serverId,
+    name: metadata.name,
+    version: metadata.version,
+    gamePort: gamePort || undefined
+  };
+}
+
 // POST /api/servers/:id/recreate - Recreate Docker container from metadata
 app.post('/api/servers/:id/recreate', async (req, res) => {
   try {
     const serverId = req.params.id;
+    if (!validateServerId(serverId)) {
+      return res.status(400).json({ error: 'Invalid server ID' });
+    }
+
     const serverPath = getServerPath(serverId);
     const metadataPath = path.join(serverPath, 'metadata.json');
 
@@ -1082,116 +1264,89 @@ app.post('/api/servers/:id/recreate', async (req, res) => {
       return res.status(400).json({ error: 'Server metadata not found. Cannot recreate.' });
     }
 
-    // Read metadata
-    const metadata = await fs.readJson(metadataPath);
-
-    // Check if container already exists and destroy it first
-    let existingContainer = null;
-    try {
-      const containers = await docker.listContainers({ all: true });
-      const existing = containers.find(c => c.Labels['server-id'] === serverId);
-      existingContainer = existing;
-    } catch (err) {
-      console.error('Failed to check for existing container:', err.message);
-    }
-
-    if (existingContainer) {
-      try {
-        console.log(`Destroying existing container for ${serverId} before recreation...`);
-        const container = docker.getContainer(existingContainer.Id);
-
-        // Stop container if running
-        try {
-          const containerInfo = await container.inspect();
-          if (containerInfo.State.Running) {
-            await container.stop();
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-        } catch (err) {
-          console.error(`Failed to stop container ${serverId}:`, err.message);
-        }
-
-        // Remove container
-        await container.remove({ force: true });
-        console.log(`Successfully destroyed existing container for ${serverId}`);
-      } catch (err) {
-        console.error(`Error destroying existing container: ${err.message}`);
-        throw new Error(`Failed to destroy existing container: ${err.message}`);
-      }
-    }
-
-    // Get host data path
-    const hostDataPath = await getHostDataPath();
-    const hostServerPath = path.join(hostDataPath, serverId);
-
-    // Pull the Docker image if not available
-    try {
-      await docker.getImage(BEDROCK_IMAGE).inspect();
-    } catch {
-      console.warn(`Image not found locally, pulling ${BEDROCK_IMAGE}...`);
-      const stream = await docker.pull(BEDROCK_IMAGE);
-      await new Promise((resolve, reject) => {
-        docker.modem.followProgress(stream, (err, output) => {
-          if (err) reject(err);
-          else resolve(output);
-        });
-      });
-      console.log(`Successfully pulled image: ${BEDROCK_IMAGE}`);
-    }
-
-    // Build container config (matching original creation logic)
-    const containerConfig = {
-      Image: BEDROCK_IMAGE,
-      name: serverId,
-      User: '1000:1000',
-      Labels: {
-        'server-id': serverId,
-        'server-name': metadata.name || 'Bedrock Server'
-      },
-      Env: buildContainerEnv({ version: metadata.version, name: metadata.name }),
-      HostConfig: {
-        Binds: [`${hostServerPath}:/data`],
-        RestartPolicy: {
-          Name: 'unless-stopped'
-        },
-        Memory: metadata.memory || 2 * 1024 * 1024 * 1024
-      }
-    };
-
-    // Apply network and port configuration
-    const networkName = getNetworkName(metadata);
-    const gamePort = await applyNetworkAndPortConfig(containerConfig, networkName);
-
-    // Create and start container
-    const container = await docker.createContainer(containerConfig);
-    await container.start();
-
-    // Update metadata with actual container name
-    const containerInfo = await container.inspect();
-    const actualContainerName = containerInfo.Name ? containerInfo.Name.replace('/', '') : serverId;
-    if (await fs.pathExists(metadataPath)) {
-      const updatedMetadata = await fs.readJson(metadataPath);
-      updatedMetadata.containerName = actualContainerName;
-      updatedMetadata.updatedAt = new Date().toISOString();
-      await fs.writeJson(metadataPath, updatedMetadata, { spaces: 2 });
-    }
-
-    // Invalidate cache and broadcast update
-    invalidateServerCache(serverId);
-    setTimeout(() => broadcastServerUpdate(serverId), 2000);
-
-    const response = {
+    const result = await recreateServerContainer(serverId);
+    res.json({
       message: 'Server recreated successfully',
-      id: serverId,
-      name: metadata.name,
-      version: metadata.version,
-      note: 'Container has been recreated with stored configuration'
-    };
-    if (gamePort) response.gamePort = gamePort;
-
-    res.json(response);
+      id: result.id,
+      name: result.name,
+      version: result.version,
+      note: 'Container has been recreated with stored configuration',
+      ...(result.gamePort ? { gamePort: result.gamePort } : {})
+    });
   } catch (err) {
     console.error('Error recreating server:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/servers/:id/port - Change server port (recreates container with new port)
+app.put('/api/servers/:id/port', rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // 10 port changes per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many port change requests, please try again later' }
+}), async (req, res) => {
+  try {
+    const { port } = req.body;
+    const requestedPort = parseInt(port, 10);
+
+    if (isNaN(requestedPort) || requestedPort < 1 || requestedPort > 65535) {
+      return res.status(400).json({ error: 'Valid port number (1-65535) is required' });
+    }
+
+    const serverId = req.params.id;
+    if (!validateServerId(serverId)) {
+      return res.status(400).json({ error: 'Invalid server ID' });
+    }
+
+    const serverPath = getServerPath(serverId);
+    const metadataPath = path.join(serverPath, 'metadata.json');
+
+    if (!await fs.pathExists(serverPath)) {
+      return res.status(404).json({ error: 'Server directory not found' });
+    }
+    if (!await fs.pathExists(metadataPath)) {
+      return res.status(400).json({ error: 'Server metadata not found' });
+    }
+
+    const metadata = await fs.readJson(metadataPath);
+
+    // Port mapping only applies to networks that need it (macvlan/ipvlan expose via container IP)
+    const networkName = getNetworkName(metadata);
+    if (!(await networkRequiresPortMapping(networkName))) {
+      return res.status(400).json({ error: 'Port mapping does not apply to this server\'s network (macvlan/ipvlan use container IP directly)' });
+    }
+
+    // Skip availability check if it's the server's current port (no-op change)
+    const container = await getContainer(serverId);
+    const currentPort = container ? await (async () => {
+      try {
+        const info = await container.inspect();
+        const binding = info.NetworkSettings?.Ports?.['19132/udp']?.[0];
+        return binding ? parseInt(binding.HostPort, 10) : null;
+      } catch {
+        return null;
+      }
+    })() : null;
+
+    if (requestedPort !== currentPort && !(await isPortAvailable(requestedPort))) {
+      return res.status(400).json({ error: `Port ${requestedPort} is already in use` });
+    }
+
+    metadata.port = requestedPort;
+    metadata.updatedAt = new Date().toISOString();
+    await fs.writeJson(metadataPath, metadata, { spaces: 2 });
+
+    const result = await recreateServerContainer(serverId);
+    res.json({
+      message: 'Server port updated successfully',
+      id: result.id,
+      name: result.name,
+      gamePort: result.gamePort
+    });
+  } catch (err) {
+    console.error('Error updating server port:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2352,8 +2507,22 @@ function formatUptime(startedAt) {
   return `${hours}h ${mins}m`;
 }
 
+// Helper: Check if a specific port is available for binding
 async function isPortAvailable(port) {
   const net = require('node:net');
+
+  // First, check if any running container already uses this port
+  try {
+    const containers = await docker.listContainers({ all: false });
+    for (const c of containers) {
+      const used = (c.Ports || []).some(p => p.PublicPort === port);
+      if (used) return false;
+    }
+  } catch (err) {
+    console.warn('Failed to check container ports for availability:', err.message);
+  }
+
+  // Then verify the port can be bound
   return new Promise((resolve) => {
     const server = net.createServer();
     server.listen(port, '0.0.0.0', () => {
@@ -2373,7 +2542,7 @@ async function findAvailablePort(startPort) {
   const allocatedPorts = new Set();
 
   containers.forEach(c => {
-    c.Ports.forEach(p => {
+    (c.Ports || []).forEach(p => {
       if (p.PublicPort) {
         allocatedPorts.add(p.PublicPort);
       }
@@ -3326,15 +3495,7 @@ io.on('connection', (socket) => {
   // Send initial data to new client
   socket.on('request-initial-data', async () => {
     try {
-      const containers = await docker.listContainers({ all: true });
-      const bedrockServers = containers.filter(c =>
-        c.Image.includes(BEDROCK_IMAGE) && c.Labels['server-id']
-      );
-
-      const serverIds = bedrockServers.map(c => c.Labels['server-id']);
-      const servers = await Promise.all(serverIds.map(id => getCachedServerInfo(id)));
-
-      socket.emit('servers-update', servers.filter(s => s !== null));
+      socket.emit('servers-update', await listAllServers());
     } catch (err) {
       console.error('Error sending initial data:', err);
     }
@@ -3348,15 +3509,7 @@ io.on('connection', (socket) => {
 // Debounced broadcast function
 const debouncedBroadcastServerUpdate = debounce(async (serverId = null) => {
   try {
-    const containers = await docker.listContainers({ all: true });
-    const bedrockServers = containers.filter(c =>
-      c.Image.includes(BEDROCK_IMAGE) && c.Labels['server-id']
-    );
-
-    const serverIds = bedrockServers.map(c => c.Labels['server-id']);
-    const servers = await Promise.all(serverIds.map(id => getCachedServerInfo(id)));
-
-    io.emit('servers-update', servers.filter(s => s !== null));
+    io.emit('servers-update', await listAllServers());
 
     // If specific server updated, also emit detailed data
     if (serverId) {
