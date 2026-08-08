@@ -349,13 +349,31 @@ function resolveSafePath(rootDir, segment) {
 }
 
 // Helper: Sanitize an addon filename into a safe folder name.
-// Uses only linear-time regexes to avoid ReDoS on attacker-controlled names.
+// Uses linear-time string operations to avoid ReDoS on attacker-controlled names.
 function sanitizeAddonName(name) {
-  return name
-    .replace(/[^a-zA-Z0-9\s\-_]/g, '') // Remove special chars except space, dash, underscore
-    .replace(/\s+/g, '_') // Replace spaces with underscores
-    .replace(/_+/g, '_') // Replace multiple underscores with single
-    .replace(/^_+|_+$/g, ''); // Trim underscores from start/end
+  // Remove special chars except space, dash, underscore
+  let sanitized = name.replace(/[^a-zA-Z0-9\s\-_]/g, '');
+  // Replace spaces with underscores
+  sanitized = sanitized.replace(/\s+/g, '_');
+
+  // Collapse consecutive underscores and trim them from both ends (no regex)
+  let collapsed = '';
+  let lastWasUnderscore = false;
+  for (const ch of sanitized) {
+    if (ch === '_') {
+      if (lastWasUnderscore) continue;
+      lastWasUnderscore = true;
+    } else {
+      lastWasUnderscore = false;
+    }
+    collapsed += ch;
+  }
+
+  let start = 0;
+  let end = collapsed.length;
+  while (start < end && collapsed[start] === '_') start++;
+  while (end > start && collapsed[end - 1] === '_') end--;
+  return collapsed.slice(start, end);
 }
 
 const app = express();
@@ -2432,14 +2450,11 @@ app.post('/api/servers/:id/unzip', express.json(), async (req, res) => {
 app.post('/api/servers/:id/backups/:backupId/restore', async (req, res) => {
   try {
     const serverPath = getServerPath(req.params.id);
-    const backupFile = resolveSafePath(
-      path.join(serverPath, 'backups'),
-      req.params.backupId + '.zip'
-    );
-
-    if (!backupFile) {
+    const backupId = path.basename(req.params.backupId);
+    if (!backupId || backupId === '.' || backupId === '..') {
       return res.status(400).json({ error: 'Invalid backup ID' });
     }
+    const backupFile = path.join(serverPath, 'backups', backupId + '.zip');
 
     if (!await fs.pathExists(backupFile)) {
       return res.status(404).json({ error: 'Backup not found' });
