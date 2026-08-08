@@ -337,17 +337,6 @@ function validatePort(port) {
   return !Number.isNaN(portNum) && portNum >= 1024 && portNum <= 65535;
 }
 
-// Helper: Resolve a user-supplied path segment against a root directory.
-// Returns null if the segment would escape the root (path traversal protection).
-function resolveSafePath(rootDir, segment) {
-  const root = path.resolve(rootDir);
-  const resolved = path.resolve(root, segment);
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-    return null;
-  }
-  return resolved;
-}
-
 // Helper: Sanitize an addon filename into a safe folder name.
 // Uses linear-time string operations to avoid ReDoS on attacker-controlled names.
 function sanitizeAddonName(name) {
@@ -2769,8 +2758,8 @@ app.get('/api/servers/:id/addons', async (req, res) => {
     const behaviorPacks = await fs.readdir(paths.behaviorPacks);
     const resourcePacks = await fs.readdir(paths.resourcePacks);
 
-    const worldName = await getWorldName(req.params.id);
-    const worldPath = resolveSafePath(paths.worlds, worldName) || path.join(paths.worlds, 'Bedrock level');
+    const worldName = path.basename(await getWorldName(req.params.id)) || 'Bedrock level';
+    const worldPath = path.join(paths.worlds, worldName);
 
     // Read enabled packs from world config
     let enabledBehaviorPacks = [];
@@ -3251,17 +3240,18 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
     const { name } = req.params;
     const paths = getAddonPaths(req.params.id);
 
-    // Validate path segments to prevent path traversal
-    const behaviorPackPath = resolveSafePath(paths.behaviorPacks, name);
-    const resourcePackPath = resolveSafePath(paths.resourcePacks, name);
+    // Sanitize path segments to prevent path traversal
+    const packName = path.basename(name);
+    if (!packName || packName === '.' || packName === '..') {
+      return res.status(400).json({ error: 'Invalid addon name' });
+    }
 
     // Get world path
-    const worldName = await getWorldName(req.params.id);
-    const worldPath = resolveSafePath(paths.worlds, worldName);
+    const worldName = path.basename(await getWorldName(req.params.id)) || 'Bedrock level';
+    const worldPath = path.join(paths.worlds, worldName);
+    const behaviorPackPath = path.join(paths.behaviorPacks, packName);
+    const resourcePackPath = path.join(paths.resourcePacks, packName);
 
-    if (!behaviorPackPath || !resourcePackPath || !worldPath) {
-      return res.status(400).json({ error: 'Invalid addon name or world name' });
-    }
     await fs.ensureDir(worldPath);
 
     // Handle behavior pack if it exists
@@ -3316,15 +3306,16 @@ app.delete('/api/servers/:id/addons/:name', async (req, res) => {
     let disabledBehavior = false;
     let disabledResource = false;
 
-    // Validate path segments to prevent path traversal
-    const worldName = await getWorldName(req.params.id);
-    const worldPath = resolveSafePath(paths.worlds, worldName);
-    const behaviorPackPath = resolveSafePath(paths.behaviorPacks, name);
-    const resourcePackPath = resolveSafePath(paths.resourcePacks, name);
-
-    if (!worldPath || !behaviorPackPath || !resourcePackPath) {
-      return res.status(400).json({ error: 'Invalid addon name or world name' });
+    // Sanitize path segments to prevent path traversal
+    const packName = path.basename(name);
+    if (!packName || packName === '.' || packName === '..') {
+      return res.status(400).json({ error: 'Invalid addon name' });
     }
+    const worldName = path.basename(await getWorldName(req.params.id)) || 'Bedrock level';
+    const worldPath = path.join(paths.worlds, worldName);
+    const behaviorPackPath = path.join(paths.behaviorPacks, packName);
+    const resourcePackPath = path.join(paths.resourcePacks, packName);
+
     await fs.ensureDir(worldPath);
 
     // Handle behavior pack if it exists
@@ -3463,16 +3454,19 @@ app.get('/api/servers/:id/worlds', async (req, res) => {
 // POST /api/servers/:id/worlds/:worldName/enable - Enable world by setting level-name
 app.post('/api/servers/:id/worlds/:worldName/enable', async (req, res) => {
   try {
-    const { id, worldName } = req.params;
+    const { id, worldName: rawWorldName } = req.params;
     const serverPath = getServerPath(id);
     const configPath = path.join(serverPath, 'server.properties');
 
-    // Check if world exists
-    const paths = getAddonPaths(id);
-    const worldPath = resolveSafePath(paths.worlds, worldName);
-    if (!worldPath) {
+    // Sanitize path segment to prevent path traversal
+    const worldName = path.basename(rawWorldName);
+    if (!worldName || worldName === '.' || worldName === '..') {
       return res.status(400).json({ error: 'Invalid world name' });
     }
+
+    // Check if world exists
+    const paths = getAddonPaths(id);
+    const worldPath = path.join(paths.worlds, worldName);
     if (!await fs.pathExists(worldPath)) {
       return res.status(404).json({ error: 'World not found' });
     }
@@ -3528,16 +3522,19 @@ app.post('/api/servers/:id/worlds/:worldName/enable', async (req, res) => {
 // DELETE /api/servers/:id/worlds/:worldName - Delete world
 app.delete('/api/servers/:id/worlds/:worldName', async (req, res) => {
   try {
-    const { id, worldName } = req.params;
+    const { id, worldName: rawWorldName } = req.params;
     const serverPath = getServerPath(id);
     const configPath = path.join(serverPath, 'server.properties');
 
-    // Check if world exists
-    const paths = getAddonPaths(id);
-    const worldPath = resolveSafePath(paths.worlds, worldName);
-    if (!worldPath) {
+    // Sanitize path segment to prevent path traversal
+    const worldName = path.basename(rawWorldName);
+    if (!worldName || worldName === '.' || worldName === '..') {
       return res.status(400).json({ error: 'Invalid world name' });
     }
+
+    // Check if world exists
+    const paths = getAddonPaths(id);
+    const worldPath = path.join(paths.worlds, worldName);
     if (!await fs.pathExists(worldPath)) {
       return res.status(404).json({ error: 'World not found' });
     }
@@ -3548,7 +3545,7 @@ app.delete('/api/servers/:id/worlds/:worldName', async (req, res) => {
       const levelNameMatch = configContent.match(/level-name=(.+)/);
       const currentWorld = levelNameMatch ? levelNameMatch[1].trim() : 'Bedrock level';
 
-      if (currentWorld === worldName) {
+      if (path.basename(currentWorld) === worldName) {
         return res.status(400).json({ error: 'Cannot delete the currently active world. Please enable another world first.' });
       }
     }
