@@ -337,6 +337,45 @@ function validatePort(port) {
   return !Number.isNaN(portNum) && portNum >= 1024 && portNum <= 65535;
 }
 
+// Helper: Resolve a user-supplied path segment against a root directory.
+// Returns null if the segment would escape the root (path traversal protection).
+function resolveSafePath(rootDir, segment) {
+  const root = path.resolve(rootDir);
+  const resolved = path.resolve(root, segment);
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    return null;
+  }
+  return resolved;
+}
+
+// Helper: Sanitize an addon filename into a safe folder name.
+// Uses linear-time string operations to avoid ReDoS on attacker-controlled names.
+function sanitizeAddonName(name) {
+  // Remove special chars except space, dash, underscore
+  let sanitized = name.replace(/[^a-zA-Z0-9\s\-_]/g, '');
+  // Replace spaces with underscores
+  sanitized = sanitized.replace(/\s+/g, '_');
+
+  // Collapse consecutive underscores and trim them from both ends (no regex)
+  let collapsed = '';
+  let lastWasUnderscore = false;
+  for (const ch of sanitized) {
+    if (ch === '_') {
+      if (lastWasUnderscore) continue;
+      lastWasUnderscore = true;
+    } else {
+      lastWasUnderscore = false;
+    }
+    collapsed += ch;
+  }
+
+  let start = 0;
+  let end = collapsed.length;
+  while (start < end && collapsed[start] === '_') start++;
+  while (end > start && collapsed[end - 1] === '_') end--;
+  return collapsed.slice(start, end);
+}
+
 const app = express();
 const server = createServer(app);
 
@@ -421,6 +460,21 @@ app.use(express.urlencoded({ limit: '50mb', extended: true })); // Handle URL-en
 
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Trust the first hop when behind a single reverse proxy (e.g. Traefik/nginx).
+// Required for express-rate-limit to key on the real client IP; harmless in direct-access setups.
+app.set('trust proxy', 1);
+
+// Global rate limiting for all API routes (deny brute-force / DoS abuse)
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 300, // 300 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' }
+});
+
+app.use('/api', apiLimiter);
 
 // Configuration
 const DATA_DIR = process.env.DATA_DIR;
@@ -2396,7 +2450,11 @@ app.post('/api/servers/:id/unzip', express.json(), async (req, res) => {
 app.post('/api/servers/:id/backups/:backupId/restore', async (req, res) => {
   try {
     const serverPath = getServerPath(req.params.id);
-    const backupFile = path.join(serverPath, 'backups', req.params.backupId + '.zip');
+    const backupId = path.basename(req.params.backupId);
+    if (!backupId || backupId === '.' || backupId === '..') {
+      return res.status(400).json({ error: 'Invalid backup ID' });
+    }
+    const backupFile = path.join(serverPath, 'backups', backupId + '.zip');
 
     if (!await fs.pathExists(backupFile)) {
       return res.status(404).json({ error: 'Backup not found' });
@@ -2676,11 +2734,7 @@ function generatePackFolderName(addonName, suffix) {
   let baseName = addonName.replace(/\.[^/.]+$/, '');
 
   // Sanitize name: replace spaces and special chars with underscores
-  baseName = baseName
-    .replaceAll(/[^a-zA-Z0-9\s\-_]/g, '') // Remove special chars except space, dash, underscore
-    .replaceAll(/\s+/g, '_') // Replace spaces with underscores
-    .replaceAll(/_+/g, '_') // Replace multiple underscores with single
-    .replaceAll(/^(_+)$|^$|(_+)$/g, ''); // Trim underscores from start/end
+  baseName = sanitizeAddonName(baseName);
 
   // Ensure baseName is not empty
   if (!baseName) {
@@ -2716,7 +2770,7 @@ app.get('/api/servers/:id/addons', async (req, res) => {
     const resourcePacks = await fs.readdir(paths.resourcePacks);
 
     const worldName = await getWorldName(req.params.id);
-    const worldPath = path.join(paths.worlds, worldName);
+    const worldPath = resolveSafePath(paths.worlds, worldName) || path.join(paths.worlds, 'Bedrock level');
 
     // Read enabled packs from world config
     let enabledBehaviorPacks = [];
@@ -2869,6 +2923,15 @@ const addonUpload = multer({
   }
 });
 
+// Helper: Remove an uploaded temp file, verifying it is inside the uploads directory
+async function removeUploadedFile(filePath) {
+  const uploadsRoot = path.resolve('./temp/addon-uploads');
+  const resolved = path.resolve(filePath);
+  if (resolved.startsWith(uploadsRoot + path.sep)) {
+    await fs.remove(resolved);
+  }
+}
+
 // OPTIONS handler for upload endpoint
 app.options('/api/servers/:id/addons/upload', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -2900,7 +2963,7 @@ async function processMcAddon(filePath, originalName, paths, serverId, io) {
   let processedItems = 0;
 
   // Generate base name for this mcaddon file (without suffix)
-  const baseName = path.basename(originalName, ext).replaceAll(/[^a-zA-Z0-9\s\-_]/g, '').replaceAll(/\s+/g, '_').replaceAll(/_+/g, '_').replaceAll(/(^_+|_+$)/g, '');
+  const baseName = sanitizeAddonName(path.basename(originalName, ext));
   const addonBaseName = baseName || 'unknown_addon';
 
   for (const item of extractedItems) {
@@ -3051,7 +3114,7 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
       addonType = 'mctemplate';
       targetDir = paths.worlds;
     } else {
-      await fs.remove(req.file.path);
+      await removeUploadedFile(req.file.path);
       io.emit('upload-progress', {
         serverId,
         status: 'error',
@@ -3086,7 +3149,7 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
       progress: 75
     });
 
-    await fs.remove(req.file.path);
+    await removeUploadedFile(req.file.path);
 
     const duration = Date.now() - startTime;
 
@@ -3120,7 +3183,7 @@ app.post('/api/servers/:id/addons/upload', addonUpload.single('addon'), async (r
     });
 
     if (req.file) {
-      await fs.remove(req.file.path).catch(() => { });
+      await removeUploadedFile(req.file.path).catch(() => { });
     }
 
     res.status(500).json({
@@ -3146,7 +3209,7 @@ async function toggleAddonPack(packPath, worldPath, configFileName) {
   try {
     manifest = await parseManifestJson(manifestPath);
   } catch (err) {
-    console.warn(`Failed to parse manifest at ${manifestPath}:`, err.message);
+    console.warn('Failed to parse manifest at %s:', manifestPath, err.message);
     return { toggled: false, enabled: false };
   }
 
@@ -3188,13 +3251,20 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
     const { name } = req.params;
     const paths = getAddonPaths(req.params.id);
 
+    // Validate path segments to prevent path traversal
+    const behaviorPackPath = resolveSafePath(paths.behaviorPacks, name);
+    const resourcePackPath = resolveSafePath(paths.resourcePacks, name);
+
     // Get world path
     const worldName = await getWorldName(req.params.id);
-    const worldPath = path.join(paths.worlds, worldName);
+    const worldPath = resolveSafePath(paths.worlds, worldName);
+
+    if (!behaviorPackPath || !resourcePackPath || !worldPath) {
+      return res.status(400).json({ error: 'Invalid addon name or world name' });
+    }
     await fs.ensureDir(worldPath);
 
     // Handle behavior pack if it exists
-    const behaviorPackPath = path.join(paths.behaviorPacks, name);
     const behaviorResult = await toggleAddonPack(
       behaviorPackPath,
       worldPath,
@@ -3202,7 +3272,6 @@ app.post('/api/servers/:id/addons/:name/toggle', async (req, res) => {
     );
 
     // Handle resource pack if it exists
-    const resourcePackPath = path.join(paths.resourcePacks, name);
     const resourceResult = await toggleAddonPack(
       resourcePackPath,
       worldPath,
@@ -3247,13 +3316,18 @@ app.delete('/api/servers/:id/addons/:name', async (req, res) => {
     let disabledBehavior = false;
     let disabledResource = false;
 
-    // Get world path for config management
+    // Validate path segments to prevent path traversal
     const worldName = await getWorldName(req.params.id);
-    const worldPath = path.join(paths.worlds, worldName);
+    const worldPath = resolveSafePath(paths.worlds, worldName);
+    const behaviorPackPath = resolveSafePath(paths.behaviorPacks, name);
+    const resourcePackPath = resolveSafePath(paths.resourcePacks, name);
+
+    if (!worldPath || !behaviorPackPath || !resourcePackPath) {
+      return res.status(400).json({ error: 'Invalid addon name or world name' });
+    }
     await fs.ensureDir(worldPath);
 
     // Handle behavior pack if it exists
-    const behaviorPackPath = path.join(paths.behaviorPacks, name);
     if (await fs.pathExists(behaviorPackPath)) {
       // Read manifest to get UUID
       let uuid = null;
@@ -3263,7 +3337,7 @@ app.delete('/api/servers/:id/addons/:name', async (req, res) => {
           const manifest = await parseManifestJson(manifestPath);
           uuid = manifest?.header?.uuid || null;
         } catch (err) {
-          console.warn(`Failed to parse manifest for behavior pack ${name}:`, err.message);
+          console.warn('Failed to parse manifest for behavior pack %s:', name, err.message);
           // Continue with deletion even if manifest can't be parsed
         }
       }
@@ -3289,7 +3363,6 @@ app.delete('/api/servers/:id/addons/:name', async (req, res) => {
     }
 
     // Handle resource pack if it exists
-    const resourcePackPath = path.join(paths.resourcePacks, name);
     if (await fs.pathExists(resourcePackPath)) {
       // Read manifest to get UUID
       let uuid = null;
@@ -3299,7 +3372,7 @@ app.delete('/api/servers/:id/addons/:name', async (req, res) => {
           const manifest = await parseManifestJson(manifestPath);
           uuid = manifest?.header?.uuid || null;
         } catch (err) {
-          console.warn(`Failed to parse manifest for resource pack ${name}:`, err.message);
+          console.warn('Failed to parse manifest for resource pack %s:', name, err.message);
           // Continue with deletion even if manifest can't be parsed
         }
       }
@@ -3396,7 +3469,10 @@ app.post('/api/servers/:id/worlds/:worldName/enable', async (req, res) => {
 
     // Check if world exists
     const paths = getAddonPaths(id);
-    const worldPath = path.join(paths.worlds, worldName);
+    const worldPath = resolveSafePath(paths.worlds, worldName);
+    if (!worldPath) {
+      return res.status(400).json({ error: 'Invalid world name' });
+    }
     if (!await fs.pathExists(worldPath)) {
       return res.status(404).json({ error: 'World not found' });
     }
@@ -3458,7 +3534,10 @@ app.delete('/api/servers/:id/worlds/:worldName', async (req, res) => {
 
     // Check if world exists
     const paths = getAddonPaths(id);
-    const worldPath = path.join(paths.worlds, worldName);
+    const worldPath = resolveSafePath(paths.worlds, worldName);
+    if (!worldPath) {
+      return res.status(400).json({ error: 'Invalid world name' });
+    }
     if (!await fs.pathExists(worldPath)) {
       return res.status(404).json({ error: 'World not found' });
     }
